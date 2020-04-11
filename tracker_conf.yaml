@@ -1,0 +1,34 @@
+!Bot &my_bot 
+
+  notification_services:
+    - !EmailNotificationService
+          params: {smtp: "dddd", to: "mart2010.1@gmail.com"} 
+          active: N
+    - !ConsolNotificationService
+          dummy: null
+
+  datafeed_services:
+    - !CryptoDataFeed &bitstamp_feed
+          url: "https://www.bitstamp.net/api/v2/ticker/{pair}"
+    - !CryptoDataFeed &bitfinex_feed
+          url: "https://api.bitfinex.com/v1/pubticker/{pair}"
+    - !CryptoDataFeed &kraken_feed
+          url: "https://api.kraken.com/0/public/Ticker?{pair}"
+
+
+  event_trackers:
+    - !TickerEventTracker &my_xtz
+          symbol: &pair1 "BTCUSD"
+          params: {lo: 1.5, hi: 1.8, max_daily: 10.0, min_daily: -10.0, wait_time: 300}
+          datafeed_service: *bitstamp_feed
+          request_params: {pair: *pair1}
+
+    - !TickerEventTracker &my_btc
+          symbol: &pair2 "XTZUSD"
+          params: {min_daily: -2.0}
+          datafeed_service: *kraken_feed
+          request_params: {pair: *pair2}
+
+  run_schedules:
+    - {tracker: *my_xtz, interval: 1sec}
+      
