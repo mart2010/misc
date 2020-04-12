@@ -48,8 +48,7 @@ class Bot(object):
     def run_tracker(self, tracker):
         request_p = getattr(tracker, 'request_params', None)
         service_response = tracker.datafeed_service.request(request_params=request_p)
-        ticker = ticker_response_adapter(service_response, request_p, tracker.datafeed_service.url)
-        msgs = tracker.signal_events(ticker)
+        msgs = tracker.signal_events(service_response)
         for n in self.notification_services:
             n.notify(msgs)
 
@@ -69,7 +68,6 @@ class Bot(object):
         return "Bot for EventTrackers: {}".format(self.event_trackers)
 
 
-
 class NotificationService(object):
     def __init__(self, **params):
         self.params = params
@@ -86,12 +84,12 @@ class NotificationService(object):
             self._notify(messages)
 
     def short_msg(self, messages):
-        short_msg = "Event signaled: "
+        short_msg = "Event(s) signaled: "
         m = " || ".join(messages)
         return short_msg + m
         
     def long_msg(self, messages):
-        long_msg = "_"*50 + "\n{nb} Events signaled:\n\t{msgs}" + "\n" + "_"*50 + "\n\n"
+        long_msg = "_"*50 + "\n{nb} Event(s) signaled:\n\t{msgs}" + "\n" + "_"*50 + "\n\n"
         m = "\n\t- " + "\n\t- ".join(messages)
         return long_msg.format(nb=len(messages), msgs=m) 
 
@@ -104,15 +102,16 @@ class ConsolNotificationService(NotificationService):
     def notify(self, messages):
         if self.active:
             if len(messages) == 0:
-                print("No messages signaled at {}".format(datetime.now()))
+                # print("No messages signaled for at {}".format(datetime.now()))
+                pass
             else:
                 #print("Short message--> " + self.short_msg(messages))
                 print("Long message-->\n" + self.long_msg(messages))
 
 
-class NotifyRunService(NotificationService):
+class AndroidPushNotifyService(NotificationService):
     """Use notify.run free service using "Web Push API", to push notification to 
-    android phone through a Channel  (ok non-private data, see https://notify.run)
+    Android phone through a Channel (ok for non-private data --> https://notify.run)
     """
     def _notify(self, messages):
         pass
@@ -161,113 +160,29 @@ class SimpleTickerDataFeed(DataFeedService):
         complete_url = self.url.format(**request_params)
 
         try:
-            # r = requests.get(complete_url)
+            r = requests.get(complete_url)
+            if r.status_code != requests.codes.ok:
+                raise Exception("Request {} response not 200-OK: {}".format(complete_url, r))
+            response = r.json()
             # mock-up for test..
-            import random
-            p = str(random.uniform(1.0, 2.0))
-            t = str(datetime.now().timestamp())
-
-            if self.url.find('bitstamp') > -1:
-                r = {"last": p, "timestamp": t, "volume": "8000", "open": "1.5", "high": "1", "bid": "1", "vwap":"1", "low":"1", "ask":"1"}
-            elif self.url.find('kraken') > -1:
-                r = {"error":[],"result":{"XTZUSD":{"a":["1.963400","1135","1135.000"],"b":["1.960200","829","829.000"],"c":["1.953400","169.08065753"],"v":["162651.08050865","733026.03677556"],"p":["1.929881","1.904369"],"t":[397,1553],"l":["1.896800","1.894300"],"h":["1.993500","2.007000"],"o":"1.974000"}}}
+            # import random
+            # p = str(random.uniform(1.0, 2.0))
+            # t = str(datetime.now().timestamp())
+            # if self.url.find('bitstamp') > -1:
+            #     r = {"last": p, "timestamp": t, "volume": "8000", "open": "1.5", "high": "1", "bid": "1", "vwap":"1", "low":"1", "ask":"1"}
+            # elif self.url.find('kraken') > -1:
+            #     r = {"error":[],"result":{"XTZUSD":{"a":["1.963400","1135","1135.000"],"b":["1.960200","829","829.000"],"c":[p,"169.08065753"],"v":["162651.08050865","733026.03677556"],"p":["1.929881","1.904369"],"t":["397","1553"],"l":["1.896800","1.894300"],"h":["1.993500","2.007000"],"o":"1.5"}}}
         
         except requests.exceptions.RequestException as e:
             print(e)
-        print("Sending request using url: {}".format(complete_url))
-        return r
+        #print("Request at '{}', returned -->{}".format(complete_url, response))
+        return response
 
-
-def ticker_response_adapter(response, request_params, service_url):
-    # Bitstamp: high->Last 24 hours price high, low->Last 24 hours price low, last->Last BTC price, open->First price of the day, bid->Highest buy order, ask->Lowest sell order, volume-> Last 24 hours volume, vwap->Last 24 hours volume weighted average price, timestamp->Unix timestamp date and time
-    #   {"high","last", "timestamp", "bid", "vwap", "volume", "low", "ask", "open"}
-    # Bitfinex: mid-> (bid+ask)/2, bid:bid, ask:ask, last_price:last order price, low:lowest since 24hrs, high:highest since 24hrs, volume:vol last 24h, timestamp:timestamp
-    #   check all symbols supported: https://api.bitfinex.com/v1/symbols
-    #   {"mid", "bid", "ask", "last_price", "low", "high", "volume", "timestamp"
-    # Kraken: a:ask array, b:bid array, c:last price array, v:vol array, p:vol weighted array, t:nb of trade array, l:low array, h:high array, o:today's opening price
-    # check all symbols: https://api.kraken.com/0/public/AssetPairs
-    # {"error":[],"result":{"XXBTZUSD":{"a":["","",""],"b":["6.7","3","3.0"],"c":["6.3","0.087"],"v":["6.5","96."],"p":["7.8","71.7"],"t":[1,2],"l":["6.1","6.1"],"h":["7.5","7.0"],"o":"7.1"}}}
-    # {"error":[],"result":{"XTZUSD":{"a":["1.963400","1135","1135.000"],"b":["1.960200","829","829.000"],"c":["1.953400","169.08065753"],"v":["162651.08050865","733026.03677556"],"p":["1.929881","1.904369"],"t":[397,1553],"l":["1.896800","1.894300"],"h":["1.993500","2.007000"],"o":"1.974000"}}}
-    symbol = request_params['symbol'].upper()
-    # Adapt any service custom responses here only:
-    if service_url.lower().find('bitstamp') > -1:
-        values = dict(current=  response['last'],
-                      open=     response['open'],
-                      timestamp=response['timestamp'],
-                      high=     response['high'],
-                      low=      response['low'],
-                      volume=   response['volume'],
-                      bid=      response['bid'],
-                      ask=      response['ask'],
-                      vwap=     response['vwap'])
-    elif service_url.lower().find('kraken') > -1:
-        # we need the symbol (pair)
-        symbol_key = symbol
-        values = dict(current=  response['result'][symbol_key]['c'][0],
-                      open=     response['result'][symbol_key]['o'],
-                      high=     response['result'][symbol_key]['h'][0],
-                      low=      response['result'][symbol_key]['l'][0],
-                      volume=   response['result'][symbol_key]['p'][0],
-                      bid=      response['result'][symbol_key]['b'][0],
-                      ask=      response['result'][symbol_key]['a'][0],
-                      vwap=     response['result'][symbol_key]['p'][1])
-    else:
-        raise Exception("Unsupported service:{}".format(service_url))
-    
-    return Ticker(symbol, values)
-
-
-class Ticker(object):
-    def __init__(self, symbol, values):
-        """The logic of converting different format of values (from diff DataServices) 
-        need to be moved (maybe using a "builder" pattern?)
-        """
-        self.symbol = symbol
-        if type(values) != dict:
-            raise Exception("Unsupported values: {}".format(values))
-
-        # required attributes
-        self.current = float(values['current'])
-        self.open = float(values['open'])
-        # use now() when not available
-        if values.get('timestamp'):
-            self.timestamp = round(float(values['timestamp']))
-        else:
-            self.timestamp = round(datetime.now().timestamp())
-
-        # OHLC values and other possible values
-        self.set_float_values(values, ('high','low','volume','bid','ask','vwap','mid'))
-
-        
-    def set_float_values(self, values, keys):
-        for k in keys:
-            setattr(self, k, float(values.get(k,-1)))
-
-    @property
-    def day_change(self):
-        return (self.current - self.open) / self.open * 100.0
-
-    def inside(self, range_lo, range_hi):
-        return range_lo < self.current < range_hi
-
-    def direction(self, prev_ticker):
-        if not prev_ticker:
-            return 'nil'
-        if self.current > prev_ticker.current:
-            return 'up'
-        elif self.current < prev_ticker.current:
-            return 'down'
-        else:
-            return 'flat'  
-
-    def __str__(self):
-        n = datetime.fromtimestamp(self.timestamp)
-        return "Ticker {t.symbol} at {t.current:.3f} (open={t.open:.3f}, vol={t.volume:.1f}, time={now})".format(t=self, now=n)
 
 class EventTracker(object):
-    """AbstractClass for EventTracker implementations that track/return events as a list of messages.
-    The datafeed_service is loosely coupled, so the Bot knows which datafeed_service to use and 
-    provides the request_params if specified by the EventTracker.   
+    """AbstractClass for EventTracker that track/return events as a list of messages.
+    The datafeed_service is loosely coupled, it's Bot's responsability to call the datafeed_service  
+    and to provide the request_params (when specified by the EventTracker)
     """
     def __init__(self, datafeed_service, request_params=None):
         self.datafeed_service = datafeed_service
@@ -277,7 +192,7 @@ class EventTracker(object):
         pass
 
     def signal_events(self, response):
-        """Signal events and return them as list.
+        """Signal events and return them as list of text messages.
         Call by Bot using the response obtained from datafeed_service.request(self.request_params)
         """
         pass
@@ -345,11 +260,12 @@ class TickerEventTracker(EventTracker):
         # last time for change-event
         self.lastime_changevents = dict(max_daily=0, min_daily=0) 
 
-    def signal_events(self, ticker):
-        evts = []
+    def signal_events(self, response):
+        ticker = ticker_response_adapter(response, self.symbol, self.datafeed_service.url)
         self.prev_ticker = self.ticker
         self.ticker = ticker
-
+        
+        evts = []
         range_evt = self.signal_range_event()
         if range_evt:
             di = self.ticker.direction(self.prev_ticker)
@@ -367,9 +283,94 @@ class TickerEventTracker(EventTracker):
                 msg_c = self.event_change_msg.format(t=self.ticker)
                 evts.append(msg_c)
                 self.lastime_changevents[change_evt] = self.ticker.timestamp
+        if len(evts) == 0:
+            print("No event signaled for Ticker {}".format(self.ticker))
         return evts
 
-         
+
+def ticker_response_adapter(response, symbol, service_url):
+    # Bitstamp: high->Last 24h high, low->Last 24h low, last->Last price, open->First of the day, bid->Highest buy order, ask->Lowest sell order, volume-> Last 24h vol, vwap->Last 24h vol weighted average price, timestamp->Unix timestamp date and time
+    #   {"high","last", "timestamp", "bid", "vwap", "volume", "low", "ask", "open"}
+    # Bitfinex: mid-> (bid+ask)/2, bid:bid, ask:ask, last_price:last order price, low:lowest since 24hrs, high:highest since 24hrs, volume:vol last 24h, timestamp:timestamp
+    #   check all symbols supported: https://api.bitfinex.com/v1/symbols
+    #   {"mid", "bid", "ask", "last_price", "low", "high", "volume", "timestamp"
+    # Kraken: a:ask array, b:bid array, c:last price array, v:vol array, p:vol weighted array, t:nb of trade array, l:low array, h:high array, o:today's opening price
+    # check all symbols: https://api.kraken.com/0/public/AssetPairs
+    # {"error":[],"result":{"XXBTZUSD":{"a":["","",""],"b":["6.7","3","3.0"],"c":["6.3","0.087"],"v":["6.5","96."],"p":["7.8","71.7"],"t":[1,2],"l":["6.1","6.1"],"h":["7.5","7.0"],"o":"7.1"}}}
+    # {"error":[],"result":{"XTZUSD":{"a":["1.963400","1135","1135.000"],"b":["1.960200","829","829.000"],"c":["1.953400","169.08065753"],"v":["162651.08050865","733026.03677556"],"p":["1.929881","1.904369"],"t":[397,1553],"l":["1.896800","1.894300"],"h":["1.993500","2.007000"],"o":"1.974000"}}}
+    
+    # Adapt any service custom responses here only:
+    if service_url.lower().find('bitstamp') > -1:
+        values = dict(current=  response['last'],
+                      open=     response['open'],
+                      timestamp=response['timestamp'],
+                      high=     response['high'],
+                      low=      response['low'],
+                      volume=   response['volume'],
+                      bid=      response['bid'],
+                      ask=      response['ask'],
+                      vwap=     response['vwap'])
+    elif service_url.lower().find('kraken') > -1:
+        # we need the symbol (pair)
+        symbol_key = symbol.upper()
+        values = dict(current=  response['result'][symbol_key]['c'][0],
+                      open=     response['result'][symbol_key]['o'],
+                      high=     response['result'][symbol_key]['h'][0],
+                      low=      response['result'][symbol_key]['l'][0],
+                      volume=   response['result'][symbol_key]['p'][0],
+                      bid=      response['result'][symbol_key]['b'][0],
+                      ask=      response['result'][symbol_key]['a'][0],
+                      vwap=     response['result'][symbol_key]['p'][1])
+    else:
+        raise Exception("Unsupported service:{}".format(service_url))
+    
+    return Ticker(symbol, values)
+
+class Ticker(object):
+    def __init__(self, symbol, values):
+        self.symbol = symbol
+        if type(values) != dict:
+            raise Exception("Unsupported values: {}".format(values))
+        
+        # required attributes
+        self.current = float(values['current'])
+        self.open = float(values['open'])
+        # use now() when not available
+        if values.get('timestamp'):
+            self.timestamp = round(float(values['timestamp']))
+        else:
+            self.timestamp = round(datetime.now().timestamp())
+
+        # OHLC values and other possible values
+        self.set_float_values(values, ('high','low','volume','bid','ask','vwap','mid'))
+
+        
+    def set_float_values(self, values, keys):
+        for k in keys:
+            setattr(self, k, float(values.get(k,-1)))
+
+    @property
+    def day_change(self):
+        return (self.current - self.open) / self.open * 100.0
+
+    def inside(self, range_lo, range_hi):
+        return range_lo < self.current < range_hi
+
+    def direction(self, prev_ticker):
+        if not prev_ticker:
+            return 'nil'
+        if self.current > prev_ticker.current:
+            return 'up'
+        elif self.current < prev_ticker.current:
+            return 'down'
+        else:
+            return 'flat'  
+
+    def __str__(self):
+        n = datetime.fromtimestamp(self.timestamp)
+        return "Ticker {t.symbol} at {t.current:.3f} (open={t.open:.3f}, vol={t.volume:.1f}, time={now})".format(t=self, now=n)
+
+
 def prepare_bot(yaml_file):
     """Main entry to configure and return a Bot based on YAML config file.
     It registers yaml classes, load YAML file and setup bot.

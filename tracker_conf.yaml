@@ -13,13 +13,12 @@
     - !SimpleTickerDataFeed &bitfinex_feed
           url: "https://api.bitfinex.com/v1/pubticker/{symbol}"
     - !SimpleTickerDataFeed &kraken_feed
-          url: "https://api.kraken.com/0/public/Ticker?{symbol}"
-
+          url: "https://api.kraken.com/0/public/Ticker?pair={symbol}"            
 
   event_trackers:
     - !TickerEventTracker &my_xtz
           symbol: &symbol1 "XTZUSD"
-          params: {lo: 1.5, hi: 1.8, max_daily: 10.0, min_daily: -10.0, wait_time: 300}
+          params: {lo: 2.05, hi: 2.07, max_daily: 5.0, min_daily: -5.0, wait_time: 300}
           datafeed_service: *kraken_feed
           request_params: {symbol: *symbol1}
 
@@ -30,5 +29,5 @@
           request_params: {symbol: *symbol2}
 
   run_schedules:
-    - {tracker: *my_xtz, interval: 1sec}
+    - {tracker: *my_xtz, interval: 10sec}
       
