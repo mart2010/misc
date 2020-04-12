@@ -8,26 +8,26 @@
           dummy: null
 
   datafeed_services:
-    - !CryptoDataFeed &bitstamp_feed
-          url: "https://www.bitstamp.net/api/v2/ticker/{pair}"
-    - !CryptoDataFeed &bitfinex_feed
-          url: "https://api.bitfinex.com/v1/pubticker/{pair}"
-    - !CryptoDataFeed &kraken_feed
-          url: "https://api.kraken.com/0/public/Ticker?{pair}"
+    - !SimpleTickerDataFeed &bitstamp_feed
+          url: "https://www.bitstamp.net/api/v2/ticker/{symbol}"
+    - !SimpleTickerDataFeed &bitfinex_feed
+          url: "https://api.bitfinex.com/v1/pubticker/{symbol}"
+    - !SimpleTickerDataFeed &kraken_feed
+          url: "https://api.kraken.com/0/public/Ticker?{symbol}"
 
 
   event_trackers:
     - !TickerEventTracker &my_xtz
-          symbol: &pair1 "BTCUSD"
+          symbol: &symbol1 "XTZUSD"
           params: {lo: 1.5, hi: 1.8, max_daily: 10.0, min_daily: -10.0, wait_time: 300}
-          datafeed_service: *bitstamp_feed
-          request_params: {pair: *pair1}
+          datafeed_service: *kraken_feed
+          request_params: {symbol: *symbol1}
 
     - !TickerEventTracker &my_btc
-          symbol: &pair2 "XTZUSD"
+          symbol: &symbol2 "XTZUSD"
           params: {min_daily: -2.0}
-          datafeed_service: *kraken_feed
-          request_params: {pair: *pair2}
+          datafeed_service: *bitstamp_feed
+          request_params: {symbol: *symbol2}
 
   run_schedules:
     - {tracker: *my_xtz, interval: 1sec}
