@@ -7,7 +7,9 @@ data_static/
 log/
 ~/
 .vscode/
+.config/
 .pytest_cache
+/notify_run
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

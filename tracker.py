@@ -14,6 +14,7 @@ import schedule
 import time
 import os
 import smtplib
+from notify_run import Notify
 
 class Bot(object):
     def __init__(self, notification_services, datafeed_services, event_trackers):
@@ -113,9 +114,12 @@ class AndroidPushNotifyService(NotificationService):
     """Use notify.run free service using "Web Push API", to push notification to 
     Android phone through a Channel (ok for non-private data --> https://notify.run)
     """
+    def _setup(self):
+        self.notify = Notify()
+        #not to expose my channel unecessarily, Notify is configured in ~/.config/notify-run
+        
     def _notify(self, messages):
-        pass
-
+        self.notify.send(self.short_msg(messages))
 
 
 class EmailNotificationService(NotificationService):
@@ -380,9 +384,10 @@ def prepare_bot(yaml_file):
             yaml.register_class(c)
 
     yaml = ruamel.yaml.YAML()
-    register_classes((Bot, NotificationService, ConsolNotificationService, EmailNotificationService, 
-                      DataFeedService, SimpleTickerDataFeed, 
-                      EventTracker, TickerEventTracker))
+    register_classes((Bot, NotificationService, 
+                    ConsolNotificationService, EmailNotificationService, AndroidPushNotifyService,
+                    DataFeedService, SimpleTickerDataFeed, 
+                    EventTracker, TickerEventTracker))
     with open(yaml_file) as yf:
         bot = yaml.load(yf)
     bot.setup()
