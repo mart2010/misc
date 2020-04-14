@@ -29,6 +29,6 @@
           request_params: {symbol: *symbol2}
 
   run_schedules:
-    - {tracker: *my_xtz, interval: 1seconds}
-    - {tracker: *my_btc, interval: 10seconds}    
+      - {tracker: *my_xtz, interval: 1seconds}
+      - {tracker: *my_btc, interval: 10seconds}    
       

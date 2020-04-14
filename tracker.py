@@ -33,6 +33,7 @@ class Bot(object):
 
     def schedule_trackers(self):
         schedule.clear()
+        
         for r_s in getattr(self, 'run_schedules', []):
             interval_full = r_s['interval']
             interval_time = interval_full.lstrip('0123456789 ')
@@ -50,7 +51,11 @@ class Bot(object):
             n.notify(msgs)
 
     def __str__(self):
-        return "Bot with run schedules:\n\t{}".format(self.run_schedules)
+        if hasattr(self, 'run_schedules') and len(self.run_schedules) > 0:
+            return "Bot has run schedules:\n\t{}".format(self.run_schedules)
+        else:
+            return "Bot has no run schedules"
+        
 
 
 class NotificationService(object):
@@ -379,11 +384,8 @@ def setup_bot(yaml_file):
     with open(yaml_file) as yf:
         bot = yaml.load(yf)
     bot.setup()
-    if not hasattr(bot, 'run_schedules') or len(bot.run_schedules) == 0:
-        exit("No schedulers to run, exit program!")
-    else:
-        print("Finished setting up Bot--> {}".format(bot))
-        return bot
+    print("Finished setting up Bot--> {}".format(bot))
+    return bot
     
 
 def get_args():
@@ -396,8 +398,8 @@ if __name__ == '__main__':
     if not os.path.exists(args.yaml):
         exit("YAML file '{0}' not found, exit program!".format(args.yaml))
         
-    last_yaml_update = os.path.getmtime(args.yaml)
     bot = setup_bot(args.yaml)
+    last_yaml_update = os.path.getmtime(args.yaml)
     print("Running schedules, press Ctrl-C to stop!")
     try:
         while True:
