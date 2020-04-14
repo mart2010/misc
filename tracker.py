@@ -32,19 +32,15 @@ class Bot(object):
         self.schedule_trackers()
 
     def schedule_trackers(self):
-        for r_s in self.run_schedules:
+        schedule.clear()
+        for r_s in getattr(self, 'run_schedules', []):
             interval_full = r_s['interval']
             interval_time = interval_full.lstrip('0123456789 ')
+            assert interval_time in ('seconds','minutes','hours')
             val_int = int(interval_full[:-len(interval_time)])
             the_tracker = r_s['tracker']
-            if interval_time == 'sec':
-                schedule.every(val_int).seconds.do(self.run_tracker, the_tracker)
-            elif interval_time == 'min':
-                schedule.every(val_int).minutes.do(self.run_tracker, the_tracker)
-            elif interval_time == 'hour':
-                schedule.every(val_int).hours.do(self.run_tracker, the_tracker)
-            else:
-                raise Exception("Interval {} not supported".format(interval_time))
+            schedule_scheme = getattr(schedule.every(val_int),interval_time)
+            schedule_scheme.do(self.run_tracker, the_tracker)
 
     def run_tracker(self, tracker):
         request_p = getattr(tracker, 'request_params', None)
@@ -53,20 +49,8 @@ class Bot(object):
         for n in self.notification_services:
             n.notify(msgs)
 
-    def launch_schedulers(self):
-        if hasattr(self, 'run_schedules') and len(self.run_schedules) > 0:
-            print("Running schedules, press Ctrl-C to stop!")
-            try:
-                while True:
-                    schedule.run_pending()
-                    time.sleep(1)
-            except KeyboardInterrup:
-                pass
-        else:
-            print("No schedulers to run, exit program!")
-
     def __str__(self):
-        return "Bot for EventTrackers: {}".format(self.event_trackers)
+        return "Bot with run schedules:\n\t{}".format(self.run_schedules)
 
 
 class NotificationService(object):
@@ -158,25 +142,29 @@ class DataFeedService(object):
         """
         pass
 
+    def __str__(self):
+        atts = ", ".join(['{}:{}'.format(k,v) for k,v in self.__dict__.items()])
+        return "'{}' with attributes {}".format(self.__class__.__name__, atts) 
+
 
 class SimpleTickerDataFeed(DataFeedService):
     def request(self, request_params):
         complete_url = self.url.format(**request_params)
 
         try:
-            r = requests.get(complete_url)
-            if r.status_code != requests.codes.ok:
-                raise Exception("Request {} response not 200-OK: {}".format(complete_url, r))
-            response = r.json()
+            # r = requests.get(complete_url)
+            # if r.status_code != requests.codes.ok:
+            #     raise Exception("Request {} response not 200-OK: {}".format(complete_url, r))
+            # response = r.json()
             # mock-up for test..
-            # import random
-            # p = str(random.uniform(1.0, 2.0))
-            # t = str(datetime.now().timestamp())
-            # if self.url.find('bitstamp') > -1:
-            #     r = {"last": p, "timestamp": t, "volume": "8000", "open": "1.5", "high": "1", "bid": "1", "vwap":"1", "low":"1", "ask":"1"}
-            # elif self.url.find('kraken') > -1:
-            #     r = {"error":[],"result":{"XTZUSD":{"a":["1.963400","1135","1135.000"],"b":["1.960200","829","829.000"],"c":[p,"169.08065753"],"v":["162651.08050865","733026.03677556"],"p":["1.929881","1.904369"],"t":["397","1553"],"l":["1.896800","1.894300"],"h":["1.993500","2.007000"],"o":"1.5"}}}
-        
+            import random
+            p = str(random.uniform(1.0, 2.0))
+            t = str(datetime.now().timestamp())
+            if self.url.find('bitstamp') > -1:
+                r = {"last": p, "timestamp": t, "volume": "8000", "open": "1.5", "high": "1", "bid": "1", "vwap":"1", "low":"1", "ask":"1"}
+            elif self.url.find('kraken') > -1:
+                r = {"error":[],"result":{"XTZUSD":{"a":["1.963400","1135","1135.000"],"b":["1.960200","829","829.000"],"c":[p,"169.08065753"],"v":["162651.08050865","733026.03677556"],"p":["1.929881","1.904369"],"t":["397","1553"],"l":["1.896800","1.894300"],"h":["1.993500","2.007000"],"o":"1.5"}}}
+            response = r
         except requests.exceptions.RequestException as e:
             print(e)
         #print("Request at '{}', returned -->{}".format(complete_url, response))
@@ -288,7 +276,7 @@ class TickerEventTracker(EventTracker):
                 evts.append(msg_c)
                 self.lastime_changevents[change_evt] = self.ticker.timestamp
         if len(evts) == 0:
-            print("No event signaled for Ticker {}".format(self.ticker))
+            print("No event signaled for {}".format(self.ticker))
         return evts
 
 
@@ -375,7 +363,7 @@ class Ticker(object):
         return "Ticker {t.symbol} at {t.current:.3f} (open={t.open:.3f}, vol={t.volume:.1f}, time={now})".format(t=self, now=n)
 
 
-def prepare_bot(yaml_file):
+def setup_bot(yaml_file):
     """Main entry to configure and return a Bot based on YAML config file.
     It registers yaml classes, load YAML file and setup bot.
     """
@@ -391,8 +379,12 @@ def prepare_bot(yaml_file):
     with open(yaml_file) as yf:
         bot = yaml.load(yf)
     bot.setup()
-    return bot
-
+    if not hasattr(bot, 'run_schedules') or len(bot.run_schedules) == 0:
+        exit("No schedulers to run, exit program!")
+    else:
+        print("Finished setting up Bot--> {}".format(bot))
+        return bot
+    
 
 def get_args():
     parser = argparse.ArgumentParser(description="Bot managing EventTracker(s) and sending their messages to NotificationService(s) based on yaml config file")
@@ -402,7 +394,22 @@ def get_args():
 if __name__ == '__main__':
     args = get_args()
     if not os.path.exists(args.yaml):
-        exit("YAML file '{0}' not found, exit program!".format(args.yaml))    
-    bot = prepare_bot(args.yaml)
-    bot.launch_schedulers()
+        exit("YAML file '{0}' not found, exit program!".format(args.yaml))
+        
+    last_yaml_update = os.path.getmtime(args.yaml)
+    bot = setup_bot(args.yaml)
+    print("Running schedules, press Ctrl-C to stop!")
+    try:
+        while True:
+            if last_yaml_update == os.path.getmtime(args.yaml):
+                schedule.run_pending()
+            else:
+                del(bot)
+                print("Yaml config file {} was changed, resetting the Bot!".format(args.yaml))
+                bot = setup_bot(args.yaml)
+                last_yaml_update = os.path.getmtime(args.yaml)
+            time.sleep(1)
+    except KeyboardInterrup:
+        pass
+        
 

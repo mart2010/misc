@@ -18,7 +18,7 @@
   event_trackers:
     - !TickerEventTracker &my_xtz
           symbol: &symbol1 "XTZUSD"
-          params: {lo: 2.05, hi: 2.07, max_daily: 5.0, min_daily: -5.0, wait_time: 300}
+          params: {lo: 2.04, hi: 2.07, max_daily: 5.0, min_daily: -5.0, wait_time: 300}
           datafeed_service: *kraken_feed
           request_params: {symbol: *symbol1}
 
@@ -29,5 +29,6 @@
           request_params: {symbol: *symbol2}
 
   run_schedules:
-    - {tracker: *my_xtz, interval: 10sec}
+    - {tracker: *my_xtz, interval: 1seconds}
+    - {tracker: *my_btc, interval: 10seconds}    
       
