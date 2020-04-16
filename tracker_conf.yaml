@@ -3,8 +3,8 @@
   notification_services:
     - !ConsolNotificationService
           active: Y
-    - !AndroidPushNotifyService
-          dummy: null
+#     - !AndroidPushNotifyService
+#           dummy: null
 
   datafeed_services:
     - !SimpleTickerDataFeed &bitstamp_feed
@@ -28,5 +28,5 @@
           request_params: {symbol: *symbol2}
 
   run_schedules:
-      - {tracker: *my_xtz, interval: 20seconds}
+      - {tracker: *my_xtz, interval: 1seconds}
       

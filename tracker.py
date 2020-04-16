@@ -46,9 +46,9 @@ class Bot(object):
     def run_tracker(self, tracker):
         request_p = getattr(tracker, 'request_params', None)
         service_response = tracker.datafeed_service.request(request_params=request_p)
-        msgs = tracker.signal_events(service_response)
+        events_msg = tracker.signal_events(service_response)
         for n in self.notification_services:
-            n.notify(msgs)
+            n.notify(events_msg)
 
     def __str__(self):
         if hasattr(self, 'run_schedules') and len(self.run_schedules) > 0:
@@ -68,37 +68,26 @@ class NotificationService(object):
             self.active = True
         self._setup()
 
-    def notify(self, messages):
-        if self.active and len(messages) > 0:
+    def notify(self, events):
+        if self.active and not events.is_empty:
             try:
-                self._notify(messages)
+                self._notify(events)
             except Exception as e: 
                 print("{} failed to notify due to error:\n{}".format(self.__class__.__name__, e))
-
-    def short_msg(self, messages):
-        short_msg = "Event(s) signaled: "
-        m = " || ".join(messages)
-        return short_msg + m
         
-    def long_msg(self, messages):
-        long_msg = "_"*50 + "\n{nb} Event(s) signaled:\n\t{msgs}" + "\n" + "_"*50 + "\n\n"
-        m = "\n\t- " + "\n\t- ".join(messages)
-        return long_msg.format(nb=len(messages), msgs=m) 
-
     def _setup(self):
         pass
-    def _notify(messages):
+    def _notify(events):
         pass
 
 class ConsolNotificationService(NotificationService):
-    def notify(self, messages):
-        if self.active:
-            if len(messages) == 0:
-                # print("No messages signaled for at {}".format(datetime.now()))
-                pass
-            else:
-                #print("Short message--> " + self.short_msg(messages))
-                print("Long message-->\n" + self.long_msg(messages))
+    def _notify(self, events):
+        short_msgs = [s[0] for s in events]
+        long_msgs = [s[1] for s in events]
+        long_s = "_"*50 + "\n{nb} Event(s) signaled:\n\t{msgs}" + "\n" + "_"*50 + "\n\n"
+        m = "\n\t- " + "\n\t- ".join(long_msgs)
+        print("Short message--> " + " || ".join(short_msgs))
+        print("Long message-->\n" + long_s.format(nb=len(long_msgs), msgs=m))
 
 
 class AndroidPushNotifyService(NotificationService):
@@ -109,8 +98,9 @@ class AndroidPushNotifyService(NotificationService):
         self.notifier = Notify()
         #not to expose my channel unecessarily, Notify is configured in ~/.config/notify-run
         
-    def _notify(self, messages):
-        self.notifier.send(self.short_msg(messages))
+    def _notify(self, events):
+        short_msgs = [s[0] for s in events]
+        self.notifier.send(" || ".join(short_msgs))
 
 
 class EmailNotificationService(NotificationService):
@@ -123,8 +113,8 @@ class EmailNotificationService(NotificationService):
         # self.server.login(sender_email, password)
         # self.message = 'Subject: {subject}\n\n{msg}'.format(subject="ddd")
 
-    def _notify(self, messages):
-        m = "\n".join(messages)
+    def _notify(self, events):
+        m = "\n".join(events)
         print("Notify email to {} using smtp: {}, with msg:\n{}".format(self.to, self.smtp, m))
 
         try:
@@ -165,7 +155,7 @@ class SimpleTickerDataFeed(DataFeedService):
             # response = r.json()
             # mock-up for test..
             import random
-            p = str(random.uniform(1.8, 2.3))
+            p = str(random.uniform(2.0, 2.1))
             t = str(datetime.now().timestamp())
             if self.url.find('bitstamp') > -1:
                 r = {"last": p, "timestamp": t, "volume": "8000", "open": "1.5", "high": "1", "bid": "1", "vwap":"1", "low":"1", "ask":"1"}
@@ -177,9 +167,39 @@ class SimpleTickerDataFeed(DataFeedService):
         #print("Request at '{}', returned -->{}".format(complete_url, response))
         return response
 
+class Events(object):
+    """Super CLass to hold list of Events related to Ticker tracker as a list of tuple(short_msg, long_msg)
+    """
+    def __init__(self):
+        self.events = []
+
+    @property
+    def is_empty(self):
+        return len(self.events) == 0
+
+    def __iter__(self):
+        return iter(self.events)
+
+class EventsTicker(Events):
+    range_long = "Pair {t.symbol} at {t.current:.3f} (prev={prev.current:.3f}) {a} ({dir}) the range [{r[0]:.3f}-{r[1]:.3f}]"
+    range_short = "{t.symbol} {t.current:.3f} (prev={prev.current:.3f}) {a}{dir} [{r[0]:.3f}-{r[1]:.3f}]"
+    change_long = "Pair {t.symbol} at {t.current:.3f} changes {t.day_change:.2f}% from open value {t.open}"
+    change_short = "{t.symbol} {t.current:.3f} changes {t.day_change:.2f}% from open {t.open}"
+    dir_symbol = {'down': '\u2193', 'up': '\u2191'}
+    
+    def add_range_event(self, ticker, prev_ticker, action, range):
+        direction = ticker.direction(prev_ticker)
+        msg = self.range_long.format(t=ticker, prev=prev_ticker, a=action, dir=direction, r=range) 
+        short_msg = self.range_short.format(t=ticker, prev=prev_ticker, a=action, dir=self.dir_symbol[direction], r=range) 
+        self.events.append((short_msg, msg))
+
+    def add_change_event(self, ticker):
+        msg = self.change_long.format(t=ticker)
+        short_msg = self.change_short.format(t=ticker)
+        self.events.append((short_msg, msg))
 
 class EventTracker(object):
-    """AbstractClass for EventTracker that track/return events as a list of messages.
+    """AbstractClass for EventTracker that track/return events as a list of events.
     The datafeed_service is loosely coupled, it's Bot's responsability to call the datafeed_service  
     and to provide the request_params (when specified by the EventTracker)
     """
@@ -191,7 +211,7 @@ class EventTracker(object):
         pass
 
     def signal_events(self, response):
-        """Signal events and return them as list of text messages.
+        """Signal events and return them as list of text events.
         Call by Bot using the response obtained from datafeed_service.request(self.request_params)
         """
         pass
@@ -204,9 +224,9 @@ class EventTracker(object):
         return self.__str__()
 
 
+
+
 class TickerEventTracker(EventTracker):
-    event_range_msg = "Pair {t.symbol} at {t.current:.3f} (prev={prev.current:.3f}) {a} ({dir}) the range [{low:.3f}-{high:.3f}]"
-    event_change_msg = "Pair {t.symbol} at {t.current:.3f} changes {t.day_change:.2f}% from open value ({t.open})"
 
     def signal_range_event(self):
         if not self.prev_ticker or not self.lo:
@@ -264,27 +284,25 @@ class TickerEventTracker(EventTracker):
         self.prev_ticker = self.ticker
         self.ticker = ticker
         
-        evts = []
+        evts = EventsTicker()
         range_evt = self.signal_range_event()
         if range_evt:
-            di = self.ticker.direction(self.prev_ticker)
-            rkey = range_evt + "_" + di
+            rkey = range_evt + "_" + self.ticker.direction(self.prev_ticker)
             last_rtime = self.lastime_rangevents[rkey]
             if self.ticker.timestamp - last_rtime > self.wait_time:
-                msg_r = self.event_range_msg.format(t=self.ticker, prev=self.prev_ticker, a=range_evt, dir=di, low=self.lo, high=self.hi)
-                evts.append(msg_r)
+                evts.add_range_event(self.ticker, self.prev_ticker, action=range_evt, range=(self.lo, self.hi))
                 self.lastime_rangevents[rkey] = self.ticker.timestamp
 
         change_evt = self.signal_change_event()
         if change_evt:
             last_ctime = self.lastime_changevents[change_evt]
             if self.ticker.timestamp - last_ctime > self.wait_time:
-                msg_c = self.event_change_msg.format(t=self.ticker)
-                evts.append(msg_c)
+                evts.add_change_event(self.ticker)
                 self.lastime_changevents[change_evt] = self.ticker.timestamp
-        if len(evts) == 0:
+        if evts.is_empty:
             print("No event signaled for {}".format(self.ticker))
         return evts
+
 
 
 def ticker_response_adapter(response, symbol, service_url):
@@ -391,7 +409,7 @@ def setup_bot(yaml_file):
     
 
 def get_args():
-    parser = argparse.ArgumentParser(description="Bot managing EventTracker(s) and sending their messages to NotificationService(s) based on yaml config file")
+    parser = argparse.ArgumentParser(description="Bot managing EventTracker(s) and sending their events to NotificationService(s) based on yaml config file")
     parser.add_argument("-y", "--yaml", default="./tracker_conf.yaml", help="Yaml config file")
     return parser.parse_args()
               
