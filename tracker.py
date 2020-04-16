@@ -104,11 +104,11 @@ class AndroidPushNotifyService(NotificationService):
     Android phone through a Channel (ok for non-private data --> https://notify.run)
     """
     def _setup(self):
-        self.notify = Notify()
+        self.notifier = Notify()
         #not to expose my channel unecessarily, Notify is configured in ~/.config/notify-run
         
     def _notify(self, messages):
-        self.notify.send(self.short_msg(messages))
+        self.notifier.send(self.short_msg(messages))
 
 
 class EmailNotificationService(NotificationService):
@@ -157,19 +157,19 @@ class SimpleTickerDataFeed(DataFeedService):
         complete_url = self.url.format(**request_params)
 
         try:
-            # r = requests.get(complete_url)
-            # if r.status_code != requests.codes.ok:
-            #     raise Exception("Request {} response not 200-OK: {}".format(complete_url, r))
-            # response = r.json()
+            r = requests.get(complete_url)
+            if r.status_code != requests.codes.ok:
+                raise Exception("Request {} response not 200-OK: {}".format(complete_url, r))
+            response = r.json()
             # mock-up for test..
-            import random
-            p = str(random.uniform(1.0, 2.0))
-            t = str(datetime.now().timestamp())
-            if self.url.find('bitstamp') > -1:
-                r = {"last": p, "timestamp": t, "volume": "8000", "open": "1.5", "high": "1", "bid": "1", "vwap":"1", "low":"1", "ask":"1"}
-            elif self.url.find('kraken') > -1:
-                r = {"error":[],"result":{"XTZUSD":{"a":["1.963400","1135","1135.000"],"b":["1.960200","829","829.000"],"c":[p,"169.08065753"],"v":["162651.08050865","733026.03677556"],"p":["1.929881","1.904369"],"t":["397","1553"],"l":["1.896800","1.894300"],"h":["1.993500","2.007000"],"o":"1.5"}}}
-            response = r
+            # import random
+            # p = str(random.uniform(1.0, 2.0))
+            # t = str(datetime.now().timestamp())
+            # if self.url.find('bitstamp') > -1:
+            #     r = {"last": p, "timestamp": t, "volume": "8000", "open": "1.5", "high": "1", "bid": "1", "vwap":"1", "low":"1", "ask":"1"}
+            # elif self.url.find('kraken') > -1:
+            #     r = {"error":[],"result":{"XTZUSD":{"a":["1.963400","1135","1135.000"],"b":["1.960200","829","829.000"],"c":[p,"169.08065753"],"v":["162651.08050865","733026.03677556"],"p":["1.929881","1.904369"],"t":["397","1553"],"l":["1.896800","1.894300"],"h":["1.993500","2.007000"],"o":"1.5"}}}
+            # response = r
         except requests.exceptions.RequestException as e:
             print(e)
         #print("Request at '{}', returned -->{}".format(complete_url, response))
