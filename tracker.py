@@ -57,7 +57,6 @@ class Bot(object):
             return "Bot has no run schedules"
         
 
-
 class NotificationService(object):
     def __init__(self, **params):
         self.params = params
@@ -71,7 +70,10 @@ class NotificationService(object):
 
     def notify(self, messages):
         if self.active and len(messages) > 0:
-            self._notify(messages)
+            try:
+                self._notify(messages)
+            except Exception as e: 
+                print("{} failed to notify due to error:\n{}".format(self.__class__.__name__, e))
 
     def short_msg(self, messages):
         short_msg = "Event(s) signaled: "
@@ -157,19 +159,19 @@ class SimpleTickerDataFeed(DataFeedService):
         complete_url = self.url.format(**request_params)
 
         try:
-            r = requests.get(complete_url)
-            if r.status_code != requests.codes.ok:
-                raise Exception("Request {} response not 200-OK: {}".format(complete_url, r))
-            response = r.json()
+            # r = requests.get(complete_url)
+            # if r.status_code != requests.codes.ok:
+            #     raise Exception("Request {} response not 200-OK: {}".format(complete_url, r))
+            # response = r.json()
             # mock-up for test..
-            # import random
-            # p = str(random.uniform(1.0, 2.0))
-            # t = str(datetime.now().timestamp())
-            # if self.url.find('bitstamp') > -1:
-            #     r = {"last": p, "timestamp": t, "volume": "8000", "open": "1.5", "high": "1", "bid": "1", "vwap":"1", "low":"1", "ask":"1"}
-            # elif self.url.find('kraken') > -1:
-            #     r = {"error":[],"result":{"XTZUSD":{"a":["1.963400","1135","1135.000"],"b":["1.960200","829","829.000"],"c":[p,"169.08065753"],"v":["162651.08050865","733026.03677556"],"p":["1.929881","1.904369"],"t":["397","1553"],"l":["1.896800","1.894300"],"h":["1.993500","2.007000"],"o":"1.5"}}}
-            # response = r
+            import random
+            p = str(random.uniform(1.8, 2.3))
+            t = str(datetime.now().timestamp())
+            if self.url.find('bitstamp') > -1:
+                r = {"last": p, "timestamp": t, "volume": "8000", "open": "1.5", "high": "1", "bid": "1", "vwap":"1", "low":"1", "ask":"1"}
+            elif self.url.find('kraken') > -1:
+                r = {"error":[],"result":{"XTZUSD":{"a":["1.963400","1135","1135.000"],"b":["1.960200","829","829.000"],"c":[p,"169.08065753"],"v":["162651.08050865","733026.03677556"],"p":["1.929881","1.904369"],"t":["397","1553"],"l":["1.896800","1.894300"],"h":["1.993500","2.007000"],"o":"1.5"}}}
+            response = r
         except requests.exceptions.RequestException as e:
             print(e)
         #print("Request at '{}', returned -->{}".format(complete_url, response))
@@ -301,12 +303,12 @@ def ticker_response_adapter(response, symbol, service_url):
         values = dict(current=  response['last'],
                       open=     response['open'],
                       timestamp=response['timestamp'],
-                      high=     response['high'],
-                      low=      response['low'],
-                      volume=   response['volume'],
-                      bid=      response['bid'],
-                      ask=      response['ask'],
-                      vwap=     response['vwap'])
+                      high=     response.get('high',-1),
+                      low=      response.get('low',-1),
+                      volume=   response.get('volume',-1),
+                      bid=      response.get('bid',-1),
+                      ask=      response.get('ask',-1),
+                      vwap=     response.get('vwap',-1))
     elif service_url.lower().find('kraken') > -1:
         # we need the symbol (pair)
         symbol_key = symbol.upper()
@@ -336,7 +338,7 @@ class Ticker(object):
         if values.get('timestamp'):
             self.timestamp = round(float(values['timestamp']))
         else:
-            self.timestamp = round(datetime.now().timestamp())
+            self.timestamp = round(datetime.utcnow().timestamp())
 
         # OHLC values and other possible values
         self.set_float_values(values, ('high','low','volume','bid','ask','vwap','mid'))
