@@ -13,7 +13,8 @@ import importlib
 import schedule
 import time
 import os
-import smtplib
+import getpass
+import smtplib, ssl
 from notify_run import Notify
 
 class Bot(object):
@@ -66,7 +67,8 @@ class NotificationService(object):
             self.active = False
         else:
             self.active = True
-        self._setup()
+        if self.active:
+            self._setup()
 
     def notify(self, events):
         if self.active and not events.is_empty:
@@ -80,17 +82,23 @@ class NotificationService(object):
     def _notify(events):
         pass
 
+    def short_messages(self, events, concat=" || "):
+        short_msgs = [s[0] for s in events]
+        return concat.join(short_msgs)
+
+    def long_messages(self, events, concat="\n\t- "):
+        long_msgs = [s[1] for s in events]
+        m = concat.join(long_msgs)
+        long_s = "_"*50 + "\n{nb} Event(s) signaled:{concat}{msgs}" + "\n" + "_"*50 + "\n\n"
+        return long_s.format(nb=len(long_msgs), concat=concat, msgs=m)
+
 class ConsolNotificationService(NotificationService):
     def _notify(self, events):
-        short_msgs = [s[0] for s in events]
-        long_msgs = [s[1] for s in events]
-        long_s = "_"*50 + "\n{nb} Event(s) signaled:\n\t{msgs}" + "\n" + "_"*50 + "\n\n"
-        m = "\n\t- " + "\n\t- ".join(long_msgs)
-        print("Short message--> " + " || ".join(short_msgs))
-        print("Long message-->\n" + long_s.format(nb=len(long_msgs), msgs=m))
+        print("Short message--> " + self.short_messages(events))
+        print("Long message-->\n" + self.long_messages(events))
 
 
-class AndroidPushNotifyService(NotificationService):
+class AndroidPushNotificationService(NotificationService):
     """Use notify.run free service using "Web Push API", to push notification to 
     Android phone through a Channel (ok for non-private data --> https://notify.run)
     """
@@ -99,29 +107,35 @@ class AndroidPushNotifyService(NotificationService):
         #not to expose my channel unecessarily, Notify is configured in ~/.config/notify-run
         
     def _notify(self, events):
-        short_msgs = [s[0] for s in events]
-        self.notifier.send(" || ".join(short_msgs))
+        self.notifier.send(self.short_messages(events))
 
 
 class EmailNotificationService(NotificationService):
-    # TODO: à finir...
+    """Use smtp server with SSL connection to send email notifications
+    """
+    message = \
+"""Subject: {subject}
+
+{message}
+"""
     def _setup(self):
         self.smtp = self.params['smtp']
-        self.to =  self.params['to'] 
-        # self.server = smtplib.SMTP(self.smtp, 587)
-        # self.server.starttls()
-        # self.server.login(sender_email, password)
-        # self.message = 'Subject: {subject}\n\n{msg}'.format(subject="ddd")
+        # port 465 for SSL
+        self.port = self.params.get('port',465)
+        self.login = self.params['login']
+        self.pwd = getpass.getpass("Enter login/sender '{}' password: ".format(self.login))
+        self.to =  self.params['to']
+        # secured SSL content
+        self.context = ssl.create_default_context()
+
 
     def _notify(self, events):
-        m = "\n".join(events)
-        print("Notify email to {} using smtp: {}, with msg:\n{}".format(self.to, self.smtp, m))
+        complete_msg = self.message.format(subject=self.short_messages(events), message=self.long_messages(events))
+        print("Notify email with msg:\n{}".format(complete_msg))
+        with smtplib.SMTP_SSL(self.smtp, self.port, context=self.context) as server:
+             server.login(self.login, self.pwd)
+             server.sendmail(self.login, self.to, complete_msg)
 
-        try:
-            self.server.sendmail(sender_email, to, message)
-            self.server.quit()
-        except Exception as e:
-            print(e)
 
 
 class DataFeedService(object):
@@ -211,7 +225,7 @@ class EventTracker(object):
         pass
 
     def signal_events(self, response):
-        """Signal events and return them as list of text events.
+        """Signal events and return them as `Events` object. 
         Call by Bot using the response obtained from datafeed_service.request(self.request_params)
         """
         pass
@@ -398,7 +412,7 @@ def setup_bot(yaml_file):
 
     yaml = ruamel.yaml.YAML()
     register_classes((Bot, NotificationService, 
-                    ConsolNotificationService, EmailNotificationService, AndroidPushNotifyService,
+                    ConsolNotificationService, EmailNotificationService, AndroidPushNotificationService,
                     DataFeedService, SimpleTickerDataFeed, 
                     EventTracker, TickerEventTracker))
     with open(yaml_file) as yf:

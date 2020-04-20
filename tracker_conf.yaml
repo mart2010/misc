@@ -2,9 +2,13 @@
 
   notification_services:
     - !ConsolNotificationService
+          active: N     
+    - !AndroidPushNotificationService
+          active: N
+    - !EmailNotificationService
           active: Y
-#     - !AndroidPushNotifyService
-#           dummy: null
+          params: {smtp: "smtp.gmail.com", login: &login "mart2010.l@gmail.com", to: *login}
+
 
   datafeed_services:
     - !SimpleTickerDataFeed &bitstamp_feed
@@ -28,5 +32,5 @@
           request_params: {symbol: *symbol2}
 
   run_schedules:
-      - {tracker: *my_xtz, interval: 1seconds}
+      - {tracker: *my_xtz, interval: 20seconds}
       
