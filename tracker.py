@@ -46,10 +46,20 @@ class Bot(object):
 
     def run_tracker(self, tracker):
         request_p = getattr(tracker, 'request_params', None)
-        service_response = tracker.datafeed_service.request(request_params=request_p)
-        events_msg = tracker.signal_events(service_response)
+        err_msg = None
+        try:
+            service_response = tracker.datafeed_service.request(request_params=request_p)
+        except Exception as e:
+            err_msg = "A datafeedService failed, exit Bot!"
+            print(err_msg + ", check error:\n{}".format(e))
+            events_msg = Events(one_event=(err_msg, str(e)))
+        else:
+            events_msg = tracker.signal_events(service_response)
+
         for n in self.notification_services:
             n.notify(events_msg)
+        if err_msg:
+            raise Exception(err_msg)
 
     def __str__(self):
         if hasattr(self, 'run_schedules') and len(self.run_schedules) > 0:
@@ -101,6 +111,7 @@ class ConsolNotificationService(NotificationService):
 class AndroidPushNotificationService(NotificationService):
     """Use notify.run free service using "Web Push API", to push notification to 
     Android phone through a Channel (ok for non-private data --> https://notify.run)
+    Pas fiable, bcp de message droppé surtout sur le portable..
     """
     def _setup(self):
         self.notifier = Notify()
@@ -148,8 +159,9 @@ class DataFeedService(object):
         pass
 
     def request(self, request_params=None):
-        """Send a request and return the response as dict. This is used by the Bot which may also 
-        provides a request_params if specified in the EventTracker 
+        """Send a request and return response as dict. It is called by `Bot` which 
+        may also provide a request_params when provided by the EventTracker. 
+        Return Exception in case of error. 
         """
         pass
 
@@ -162,30 +174,28 @@ class SimpleTickerDataFeed(DataFeedService):
     def request(self, request_params):
         complete_url = self.url.format(**request_params)
 
-        try:
-            # r = requests.get(complete_url)
-            # if r.status_code != requests.codes.ok:
-            #     raise Exception("Request {} response not 200-OK: {}".format(complete_url, r))
-            # response = r.json()
-            # mock-up for test..
-            import random
-            p = str(random.uniform(2.0, 2.1))
-            t = str(datetime.now().timestamp())
-            if self.url.find('bitstamp') > -1:
-                r = {"last": p, "timestamp": t, "volume": "8000", "open": "1.5", "high": "1", "bid": "1", "vwap":"1", "low":"1", "ask":"1"}
-            elif self.url.find('kraken') > -1:
-                r = {"error":[],"result":{"XTZUSD":{"a":["1.963400","1135","1135.000"],"b":["1.960200","829","829.000"],"c":[p,"169.08065753"],"v":["162651.08050865","733026.03677556"],"p":["1.929881","1.904369"],"t":["397","1553"],"l":["1.896800","1.894300"],"h":["1.993500","2.007000"],"o":"1.5"}}}
-            response = r
-        except requests.exceptions.RequestException as e:
-            print(e)
-        #print("Request at '{}', returned -->{}".format(complete_url, response))
+        r = requests.get(complete_url)
+        if r.status_code != requests.codes.ok:
+            raise Exception("Request {} response not 200-OK: {}".format(complete_url, r))
+        response = r.json()
+        # mock-up for test..
+        # import random
+        # p = str(random.uniform(2.0, 2.1))
+        # t = str(datetime.now().timestamp())
+        # if self.url.find('bitstamp') > -1:
+        #     r = {"last": p, "timestamp": t, "volume": "8000", "open": "1.5", "high": "1", "bid": "1", "vwap":"1", "low":"1", "ask":"1"}
+        # elif self.url.find('kraken') > -1:
+        #     r = {"error":[],"result":{"XTZUSD":{"a":["1.963400","1135","1135.000"],"b":["1.960200","829","829.000"],"c":[p,"169.08065753"],"v":["162651.08050865","733026.03677556"],"p":["1.929881","1.904369"],"t":["397","1553"],"l":["1.896800","1.894300"],"h":["1.993500","2.007000"],"o":"1.5"}}}
+        # response = r
         return response
 
 class Events(object):
     """Super CLass to hold list of Events related to Ticker tracker as a list of tuple(short_msg, long_msg)
     """
-    def __init__(self):
+    def __init__(self, one_event=None):
         self.events = []
+        if one_event:
+            self.events.append(one_event)
 
     @property
     def is_empty(self):
@@ -222,12 +232,17 @@ class EventTracker(object):
         self.request_params = request_params
 
     def setup(self):
-        pass
+        #default is to NEVER wait before sending same type event
+        self.wait_time = self.params.get('wait_time',0)
+        self._setup()
 
     def signal_events(self, response):
         """Signal events and return them as `Events` object. 
         Call by Bot using the response obtained from datafeed_service.request(self.request_params)
         """
+        pass
+
+    def _setup(self):
         pass
 
     def __str__(self):
@@ -268,7 +283,7 @@ class TickerEventTracker(EventTracker):
         self.symbol = symbol
         self.params = params
 
-    def setup(self):
+    def _setup(self):
         if not self.params.get('lo') and not self.params.get('hi'):
             self.lo = None
             self.hi = None
@@ -285,8 +300,6 @@ class TickerEventTracker(EventTracker):
         self.min_daily = self.params.get('min_daily', None)
 
         self.ticker = None
-        #default is to wait 1 hour before sending same event
-        self.wait_time = self.params.get('wait_time',3600)
 
         # last time for range-events
         self.lastime_rangevents = dict(enter_up=0, enter_down=0, exit_up=0, exit_down=0, cross_up=0, cross_down=0)
@@ -342,8 +355,9 @@ def ticker_response_adapter(response, symbol, service_url):
                       ask=      response.get('ask',-1),
                       vwap=     response.get('vwap',-1))
     elif service_url.lower().find('kraken') > -1:
-        # we need the symbol (pair)
-        symbol_key = symbol.upper()
+        s = symbol.upper()
+        # to check why we have different key.symbol on response
+        symbol_key = 'X' + s[:3] + 'Z' + s[3:]
         values = dict(current=  response['result'][symbol_key]['c'][0],
                       open=     response['result'][symbol_key]['o'],
                       high=     response['result'][symbol_key]['h'][0],
@@ -399,7 +413,7 @@ class Ticker(object):
 
     def __str__(self):
         n = datetime.fromtimestamp(self.timestamp)
-        return "Ticker {t.symbol} at {t.current:.3f} (open={t.open:.3f}, vol={t.volume:.1f}, time={now})".format(t=self, now=n)
+        return "Ticker {t.symbol} at {t.current:.3f} (open={t.open:.3f}, vol={t.volume:.1f}, utc-time={now})".format(t=self, now=n)
 
 
 def setup_bot(yaml_file):

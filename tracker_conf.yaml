@@ -2,11 +2,11 @@
 
   notification_services:
     - !ConsolNotificationService
-          active: N     
+          active: Y
     - !AndroidPushNotificationService
           active: N
     - !EmailNotificationService
-          active: Y
+          active: N
           params: {smtp: "smtp.gmail.com", login: &login "mart2010.l@gmail.com", to: *login}
 
 
@@ -21,16 +21,31 @@
   event_trackers:
     - !TickerEventTracker &my_xtz
           symbol: &symbol1 "XTZUSD"
-          params: {lo: 2.02, hi: 2.08, max_daily: 5.0, min_daily: -5.0, wait_time: 600}
+          params: {lo: 2.02, hi: 2.08, max_daily: 5.0, min_daily: -5.0}
           datafeed_service: *kraken_feed
           request_params: {symbol: *symbol1}
 
     - !TickerEventTracker &my_btc
-          symbol: &symbol2 "XTZUSD"
-          params: {min_daily: -2.0}
-          datafeed_service: *bitstamp_feed
+          symbol: &symbol2 "XBTUSD"
+          params: {lo: 7500, hi: 7800, min_daily: -5.0, max_daily: 5.0}
+          datafeed_service: *kraken_feed
           request_params: {symbol: *symbol2}
 
+    - !TickerEventTracker &my_xrp
+          symbol: &symbol3 "XRPUSD"
+          params: {lo: 0.43, hi: 0.48}
+          datafeed_service: *kraken_feed
+          request_params: {symbol: *symbol3}
+
+    - !TickerEventTracker &my_ltc
+          symbol: &symbol4 "LTCUSD"
+          params: {lo: 100, hi: 135}
+          datafeed_service: *kraken_feed
+          request_params: {symbol: *symbol4}
+
   run_schedules:
-      - {tracker: *my_xtz, interval: 20seconds}
+      - {tracker: *my_xtz, interval: 30minutes}
+      - {tracker: *my_btc, interval: 2hours}
+      - {tracker: *my_xrp, interval: 24hours}
+      - {tracker: *my_ltc, interval: 24hours}
       
