@@ -438,7 +438,7 @@ def setup_bot(yaml_file):
 
 def get_args():
     parser = argparse.ArgumentParser(description="Bot managing EventTracker(s) and sending their events to NotificationService(s) based on yaml config file")
-    parser.add_argument("-y", "--yaml", default="./tracker_conf.yaml", help="Yaml config file")
+    parser.add_argument("-y", "--yaml", default="./yaml_conf/tracker_conf.yaml", help="Yaml config file")
     return parser.parse_args()
               
 if __name__ == '__main__':
