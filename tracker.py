@@ -141,11 +141,13 @@ class EmailNotificationService(NotificationService):
 
 
     def _notify(self, events):
-        complete_msg = self.message.format(subject=self.short_messages(events), message=self.long_messages(events))
-        print("Notify email with msg:\n{}".format(complete_msg))
+        # adding "Tracker:" to mark as important on gmail side
+        complete_msg = self.message.format(subject="Tracker: "+self.short_messages(events), message=self.long_messages(events))
+        # print("Notify email with msg:\n{}".format(complete_msg))
         with smtplib.SMTP_SSL(self.smtp, self.port, context=self.context) as server:
              server.login(self.login, self.pwd)
-             server.sendmail(self.login, self.to, complete_msg)
+             # encode() added because sendmail tries to convert str to ascii and fail with special up/down arrow  
+             server.sendmail(self.login, self.to, complete_msg.encode('utf-8'))
 
 
 
@@ -180,7 +182,7 @@ class SimpleTickerDataFeed(DataFeedService):
         response = r.json()
         # mock-up for test..
         # import random
-        # p = str(random.uniform(2.0, 2.1))
+        # p = str(random.uniform(2.0, 2.2))
         # t = str(datetime.now().timestamp())
         # if self.url.find('bitstamp') > -1:
         #     r = {"last": p, "timestamp": t, "volume": "8000", "open": "1.5", "high": "1", "bid": "1", "vwap":"1", "low":"1", "ask":"1"}
@@ -355,9 +357,9 @@ def ticker_response_adapter(response, symbol, service_url):
                       ask=      response.get('ask',-1),
                       vwap=     response.get('vwap',-1))
     elif service_url.lower().find('kraken') > -1:
-        s = symbol.upper()
         # to check why we have different key.symbol on response
-        symbol_key = 'X' + s[:3] + 'Z' + s[3:]
+        assert len(response['result'].keys()) == 1
+        symbol_key = list(response['result'].keys())[0]
         values = dict(current=  response['result'][symbol_key]['c'][0],
                       open=     response['result'][symbol_key]['o'],
                       high=     response['result'][symbol_key]['h'][0],
