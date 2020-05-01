@@ -26,6 +26,9 @@ class Bot(object):
         self.event_trackers = event_trackers
 
     def setup(self):
+        if not hasattr(self, 'sleep_period'):
+            self.sleep_period = 60
+
         for n in self.notification_services:
             n.setup()
         for s in self.datafeed_services:
@@ -484,10 +487,6 @@ def setup_bot(yaml_content):
     #print("Finished setting up Bot--> {}".format(bot))
     return bot
     
-
-#period before checking Yaml-file update and run pending schedule
-sleep_period = 10
-
 def get_args():
     parser = argparse.ArgumentParser(description="Bot managing EventTracker(s) and sending their events to NotificationService(s) based on yaml config file")
     group = parser.add_mutually_exclusive_group(required=True)
@@ -512,7 +511,7 @@ if __name__ == '__main__':
                 yaml_content = get_yaml_content(args)
                 bot = setup_bot(yaml_content)
                 last_yaml_update = m_date
-            time.sleep(sleep_period)
+            time.sleep(bot.sleep_period)
     except KeyboardInterrup:
         pass
         
