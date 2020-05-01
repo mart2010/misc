@@ -10,8 +10,11 @@ log/
 .config/
 .pytest_cache
 /notify_run
+/gdrive_api_oauth
+client_secrets.json
 # no need to keep any yaml tracker conf files in repo
 yaml_conf/
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -16,6 +16,8 @@ import os
 import getpass
 import smtplib, ssl
 from notify_run import Notify
+from pydrive.drive import GoogleDrive
+from pydrive.auth import GoogleAuth
 
 class Bot(object):
     def __init__(self, notification_services, datafeed_services, event_trackers):
@@ -121,6 +123,8 @@ class AndroidPushNotificationService(NotificationService):
         self.notifier.send(self.short_messages(events))
 
 
+pwd_saved = None
+
 class EmailNotificationService(NotificationService):
     """Use smtp server with SSL connection to send email notifications
     """
@@ -130,15 +134,19 @@ class EmailNotificationService(NotificationService):
 {message}
 """
     def _setup(self):
+        global pwd_saved
         self.smtp = self.params['smtp']
         # port 465 for SSL
         self.port = self.params.get('port',465)
         self.login = self.params['login']
-        self.pwd = getpass.getpass("Enter login/sender '{}' password: ".format(self.login))
+        if pwd_saved:
+            self.pwd = pwd_saved
+        else:
+            pwd_saved = getpass.getpass("For sending emails, enter password of '{}': ".format(self.login))
+            self.pwd = pwd_saved
         self.to =  self.params['to']
         # secured SSL content
         self.context = ssl.create_default_context()
-
 
     def _notify(self, events):
         # adding "Tracker:" to mark as important on gmail side
@@ -418,7 +426,47 @@ class Ticker(object):
         return "Ticker {t.symbol} at {t.current:.3f} (open={t.open:.3f}, vol={t.volume:.1f}, utc-time={now})".format(t=self, now=n)
 
 
-def setup_bot(yaml_file):
+gdrive = None
+
+def setup_gdrive():
+    global gdrive
+    if not gdrive:
+        gauth = GoogleAuth()
+        print("Need to authenticate Google-drive access")
+        gauth.LocalWebserverAuth()
+        gdrive = GoogleDrive(gauth)
+
+gdrive_file = None
+
+def setup_gdrive_file(file_id):
+    setup_gdrive()
+    global gdrive_file
+    gdrive_file = gdrive.CreateFile({'id': file_id})
+    return gdrive_file
+        
+def get_yaml_content(args):
+    if args.local_yaml:
+        with open(args.local_yaml) as yf:
+            y_content = yf.read()
+    elif args.gdrive_yaml:
+        setup_gdrive_file(args.gdrive_yaml)
+        y_content = gdrive_file.GetContentString()
+    else:
+        raise Exception("Unsupported args '{}'".format(args))
+    print("Tracker running with Yaml content: {}".format(y_content))
+    return y_content
+
+def get_yaml_modified_date(args):
+    if args.local_yaml:
+        return os.path.getmtime(args.local_yaml)
+    elif args.gdrive_yaml:
+        gdrive_file.FetchMetadata(fields='modifiedDate')
+        modified_date_s = gdrive_file['modifiedDate']
+        # print("je suis le gdrive date=" + modified_date_s)
+        modified_date = datetime.strptime(modified_date_s, '%Y-%m-%dT%H:%M:%S.%fZ')
+        return modified_date.timestamp()
+
+def setup_bot(yaml_content):
     """Main entry to configure and return a Bot based on YAML config file.
     It registers yaml classes, load YAML file and setup bot.
     """
@@ -431,37 +479,41 @@ def setup_bot(yaml_file):
                     ConsolNotificationService, EmailNotificationService, AndroidPushNotificationService,
                     DataFeedService, SimpleTickerDataFeed, 
                     EventTracker, TickerEventTracker))
-    with open(yaml_file) as yf:
-        bot = yaml.load(yf)
+    bot = yaml.load(yaml_content)
     bot.setup()
-    print("Finished setting up Bot--> {}".format(bot))
+    #print("Finished setting up Bot--> {}".format(bot))
     return bot
     
 
+#period before checking Yaml-file update and run pending schedule
+sleep_period = 10
+
 def get_args():
     parser = argparse.ArgumentParser(description="Bot managing EventTracker(s) and sending their events to NotificationService(s) based on yaml config file")
-    parser.add_argument("-y", "--yaml", default="./yaml_conf/tracker_conf.yaml", help="Yaml config file")
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("-l", "--local_yaml", nargs="?", const="./yaml_conf/tracker_conf.yaml", help="Local Yaml filepath")
+    group.add_argument("-g", "--gdrive_yaml", nargs="?", const="1Ac8hQrAkM5OdozdQ_JiS8IXIx7mwb1Dr", help="Google drive Yaml file-Id")
     return parser.parse_args()
               
 if __name__ == '__main__':
     args = get_args()
-    if not os.path.exists(args.yaml):
-        exit("YAML file '{0}' not found, exit program!".format(args.yaml))
-        
-    bot = setup_bot(args.yaml)
-    last_yaml_update = os.path.getmtime(args.yaml)
+    yaml_content = get_yaml_content(args)
+    bot = setup_bot(yaml_content)
+    last_yaml_update = get_yaml_modified_date(args)
     print("Running schedules, press Ctrl-C to stop!")
     try:
         while True:
-            if last_yaml_update == os.path.getmtime(args.yaml):
+            m_date = get_yaml_modified_date(args)
+            if last_yaml_update == m_date:
                 schedule.run_pending()
             else:
                 del(bot)
-                print("Yaml config file {} was changed, resetting the Bot!".format(args.yaml))
-                bot = setup_bot(args.yaml)
-                last_yaml_update = os.path.getmtime(args.yaml)
-            time.sleep(1)
+                print("Yaml config file was modified, resetting the Bot!")
+                yaml_content = get_yaml_content(args)
+                bot = setup_bot(yaml_content)
+                last_yaml_update = m_date
+            time.sleep(sleep_period)
     except KeyboardInterrup:
         pass
         
-
+    
