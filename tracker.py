@@ -161,7 +161,6 @@ class EmailNotificationService(NotificationService):
              server.sendmail(self.login, self.to, complete_msg.encode('utf-8'))
 
 
-
 class DataFeedService(object):
     """Responsible to fetch online live data (ticker, ..) & return a response
     """
@@ -368,8 +367,8 @@ def ticker_response_adapter(response, symbol, service_url):
                       ask=      response.get('ask',-1),
                       vwap=     response.get('vwap',-1))
     elif service_url.lower().find('kraken') > -1:
-        # to check why we have different key.symbol on response
-        assert len(response['result'].keys()) == 1
+        # this is removed, sometimes raise Error
+        #assert len(response['result'].keys()) == 1
         symbol_key = list(response['result'].keys())[0]
         values = dict(current=  response['result'][symbol_key]['c'][0],
                       open=     response['result'][symbol_key]['o'],
@@ -436,7 +435,10 @@ def setup_gdrive():
     if not gdrive:
         gauth = GoogleAuth()
         print("Need to authenticate Google-drive access")
+        #this opens a web client for authentication, impossible to use on headless server
         gauth.LocalWebserverAuth()
+        #this could work, but probably beed to change my OAuth from Web app to 'Other client' (redo the pydrive init)
+        #gauth.CommandLineAuth()
         gdrive = GoogleDrive(gauth)
 
 gdrive_file = None
@@ -512,7 +514,9 @@ if __name__ == '__main__':
                 bot = setup_bot(yaml_content)
                 last_yaml_update = m_date
             time.sleep(bot.sleep_period)
-    except KeyboardInterrup:
+    except KeyboardInterrupt:
         pass
+    except:
+        raise
         
     
