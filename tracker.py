@@ -55,16 +55,13 @@ class Bot(object):
         try:
             service_response = tracker.datafeed_service.request(request_params=request_p)
         except Exception as e:
-            err_msg = "A datafeedService failed, exit Bot!"
-            print(err_msg + ", check error:\n{}".format(e))
+            err_msg = "A datafeedService failed, will retry Bot!"
             events_msg = Events(one_event=(err_msg, str(e)))
         else:
             events_msg = tracker.signal_events(service_response)
 
         for n in self.notification_services:
             n.notify(events_msg)
-        if err_msg:
-            raise Exception(err_msg)
 
     def __str__(self):
         if hasattr(self, 'run_schedules') and len(self.run_schedules) > 0:
@@ -320,27 +317,28 @@ class TickerEventTracker(EventTracker):
 
     def signal_events(self, response):
         ticker = ticker_response_adapter(response, self.symbol, self.datafeed_service.url)
-        self.prev_ticker = self.ticker
-        self.ticker = ticker
-        
-        evts = EventsTicker()
-        range_evt = self.signal_range_event()
-        if range_evt:
-            rkey = range_evt + "_" + self.ticker.direction(self.prev_ticker)
-            last_rtime = self.lastime_rangevents[rkey]
-            if self.ticker.timestamp - last_rtime > self.wait_time:
-                evts.add_range_event(self.ticker, self.prev_ticker, action=range_evt, range=(self.lo, self.hi))
-                self.lastime_rangevents[rkey] = self.ticker.timestamp
+        if ticker:
+            self.prev_ticker = self.ticker
+            self.ticker = ticker
+            
+            evts = EventsTicker()
+            range_evt = self.signal_range_event()
+            if range_evt:
+                rkey = range_evt + "_" + self.ticker.direction(self.prev_ticker)
+                last_rtime = self.lastime_rangevents[rkey]
+                if self.ticker.timestamp - last_rtime > self.wait_time:
+                    evts.add_range_event(self.ticker, self.prev_ticker, action=range_evt, range=(self.lo, self.hi))
+                    self.lastime_rangevents[rkey] = self.ticker.timestamp
 
-        change_evt = self.signal_change_event()
-        if change_evt:
-            last_ctime = self.lastime_changevents[change_evt]
-            if self.ticker.timestamp - last_ctime > self.wait_time:
-                evts.add_change_event(self.ticker)
-                self.lastime_changevents[change_evt] = self.ticker.timestamp
-        if evts.is_empty:
-            print("No event signaled for {}".format(self.ticker))
-        return evts
+            change_evt = self.signal_change_event()
+            if change_evt:
+                last_ctime = self.lastime_changevents[change_evt]
+                if self.ticker.timestamp - last_ctime > self.wait_time:
+                    evts.add_change_event(self.ticker)
+                    self.lastime_changevents[change_evt] = self.ticker.timestamp
+            if evts.is_empty:
+                print("No event signaled for {}".format(self.ticker))
+            return evts
 
 
 
@@ -355,7 +353,8 @@ def ticker_response_adapter(response, symbol, service_url):
     # {"error":[],"result":{"XXBTZUSD":{"a":["","",""],"b":["6.7","3","3.0"],"c":["6.3","0.087"],"v":["6.5","96."],"p":["7.8","71.7"],"t":[1,2],"l":["6.1","6.1"],"h":["7.5","7.0"],"o":"7.1"}}}
     # {"error":[],"result":{"XTZUSD":{"a":["1.963400","1135","1135.000"],"b":["1.960200","829","829.000"],"c":["1.953400","169.08065753"],"v":["162651.08050865","733026.03677556"],"p":["1.929881","1.904369"],"t":[397,1553],"l":["1.896800","1.894300"],"h":["1.993500","2.007000"],"o":"1.974000"}}}
     
-    # Adapt any service custom responses here only:
+    # Adapt custom responses
+    values = None
     if service_url.lower().find('bitstamp') > -1:
         values = dict(current=  response['last'],
                       open=     response['open'],
@@ -367,10 +366,11 @@ def ticker_response_adapter(response, symbol, service_url):
                       ask=      response.get('ask',-1),
                       vwap=     response.get('vwap',-1))
     elif service_url.lower().find('kraken') > -1:
-        # this is removed, sometimes raise Error
-        #assert len(response['result'].keys()) == 1
-        symbol_key = list(response['result'].keys())[0]
-        values = dict(current=  response['result'][symbol_key]['c'][0],
+        if len(response['result'].keys()) != 1:
+            print("Ignore unexpected response '{}', received by {}".format(response['result'], service_url))
+        else:
+            symbol_key = list(response['result'].keys())[0]
+            values = dict(current=  response['result'][symbol_key]['c'][0],
                       open=     response['result'][symbol_key]['o'],
                       high=     response['result'][symbol_key]['h'][0],
                       low=      response['result'][symbol_key]['l'][0],
@@ -380,8 +380,9 @@ def ticker_response_adapter(response, symbol, service_url):
                       vwap=     response['result'][symbol_key]['p'][1])
     else:
         raise Exception("Unsupported service:{}".format(service_url))
+    if values: 
+        return Ticker(symbol, values)
     
-    return Ticker(symbol, values)
 
 class Ticker(object):
     def __init__(self, symbol, values):
