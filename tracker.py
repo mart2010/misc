@@ -55,7 +55,7 @@ class Bot(object):
         try:
             service_response = tracker.datafeed_service.request(request_params=request_p)
         except Exception as e:
-            err_msg = "A datafeedService failed, will retry Bot!"
+            err_msg = "A datafeedService failed"
             events_msg = Events(one_event=(err_msg, str(e)))
         else:
             events_msg = tracker.signal_events(service_response)
@@ -111,7 +111,7 @@ class ConsolNotificationService(NotificationService):
 
 
 class AndroidPushNotificationService(NotificationService):
-    """Use notify.run free service using "Web Push API", to push notification to 
+    """Use notify.run free service "Web Push API" to push notification to 
     Android phone through a Channel (ok for non-private data --> https://notify.run)
     Pas fiable, bcp de message droppé surtout sur le portable..
     """
@@ -169,7 +169,7 @@ class DataFeedService(object):
 
     def request(self, request_params=None):
         """Send a request and return response as dict. It is called by `Bot` which 
-        may also provide a request_params when provided by the EventTracker. 
+        may also provide a request_params when specified by the EventTracker. 
         Return Exception in case of error. 
         """
         pass
@@ -199,7 +199,7 @@ class SimpleTickerDataFeed(DataFeedService):
         return response
 
 class Events(object):
-    """Super CLass to hold list of Events related to Ticker tracker as a list of tuple(short_msg, long_msg)
+    """Holds Events related to Ticker tracker as a list of tuple(short_msg, long_msg)
     """
     def __init__(self, one_event=None):
         self.events = []
@@ -214,26 +214,26 @@ class Events(object):
         return iter(self.events)
 
 class EventsTicker(Events):
-    range_long = "Pair {t.symbol} at {t.current:.3f} (prev={prev.current:.3f}) {a} ({dir}) the range [{r[0]:.3f}-{r[1]:.3f}]"
-    range_short = "{t.symbol} {t.current:.3f} (prev={prev.current:.3f}) {a}{dir} [{r[0]:.3f}-{r[1]:.3f}]"
-    change_long = "Pair {t.symbol} at {t.current:.3f} changes {t.day_change:.2f}% from open value {t.open}"
-    change_short = "{t.symbol} {t.current:.3f} changes {t.day_change:.2f}% from open {t.open}"
+    range_l = "Pair {t.symbol} at {t.current:.3f} (prev={prev.current:.3f}) {a} ({dir}) the range [{r[0]:.3f}-{r[1]:.3f}]"
+    range_s = "{t.symbol} {t.current:.3f} (prev={prev.current:.3f}) {a}{dir} [{r[0]:.3f}-{r[1]:.3f}]"
+    change_l = "Pair {t.symbol} at {t.current:.3f} changes {t.day_change:.2f}% from open value {t.open}"
+    change_s = "{t.symbol} {t.current:.3f} changes {t.day_change:.2f}% from open {t.open}"
     dir_symbol = {'down': '\u2193', 'up': '\u2191'}
     
     def add_range_event(self, ticker, prev_ticker, action, range):
         direction = ticker.direction(prev_ticker)
-        msg = self.range_long.format(t=ticker, prev=prev_ticker, a=action, dir=direction, r=range) 
-        short_msg = self.range_short.format(t=ticker, prev=prev_ticker, a=action, dir=self.dir_symbol[direction], r=range) 
+        msg = self.range_l.format(t=ticker, prev=prev_ticker, a=action, dir=direction, r=range) 
+        short_msg = self.range_s.format(t=ticker, prev=prev_ticker, a=action, dir=self.dir_symbol[direction], r=range) 
         self.events.append((short_msg, msg))
 
     def add_change_event(self, ticker):
-        msg = self.change_long.format(t=ticker)
-        short_msg = self.change_short.format(t=ticker)
+        msg = self.change_l.format(t=ticker)
+        short_msg = self.change_s.format(t=ticker)
         self.events.append((short_msg, msg))
 
 class EventTracker(object):
-    """AbstractClass for EventTracker that track/return events as a list of events.
-    The datafeed_service is loosely coupled, it's Bot's responsability to call the datafeed_service  
+    """AbstractClass that track events and signal them.
+    The datafeed_service is loosely coupled, it's Bot's responsability to call the datafeed_service 
     and to provide the request_params (when specified by the EventTracker)
     """
     def __init__(self, datafeed_service, request_params=None):
@@ -241,7 +241,7 @@ class EventTracker(object):
         self.request_params = request_params
 
     def setup(self):
-        #default is to NEVER wait before sending same type event
+        #default is to NEVER wait before signaling same type of event
         self.wait_time = self.params.get('wait_time',0)
         self._setup()
 
@@ -260,8 +260,6 @@ class EventTracker(object):
 
     def __repr__(self):
         return self.__str__()
-
-
 
 
 class TickerEventTracker(EventTracker):
