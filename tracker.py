@@ -6,6 +6,7 @@ Created on Wed Mar  7 10:28:47 2018
 """
 
 from datetime import datetime, timedelta
+from collections import deque
 import requests
 import ruamel.yaml
 import argparse
@@ -16,8 +17,9 @@ import os
 import getpass
 import smtplib, ssl
 from notify_run import Notify
-from pydrive.drive import GoogleDrive
-from pydrive.auth import GoogleAuth
+#from pydrive.drive import GoogleDrive
+#from pydrive.auth import GoogleAuth
+
 
 class Bot(object):
     def __init__(self, notification_services, datafeed_services, event_trackers):
@@ -54,11 +56,10 @@ class Bot(object):
         err_msg = None
         try:
             service_response = tracker.datafeed_service.request(request_params=request_p)
-        except Exception as e:
-            err_msg = "A datafeedService failed"
-            events_msg = Events(one_event=(err_msg, str(e)))
-        else:
             events_msg = tracker.signal_events(service_response)
+        except Exception as e:
+            err_msg = "run_tracker failed"
+            events_msg = Events(one_event=(err_msg, str(e)))
 
         for n in self.notification_services:
             n.notify(events_msg)
@@ -95,11 +96,11 @@ class NotificationService(object):
         pass
 
     def short_messages(self, events, concat=" || "):
-        short_msgs = [s[0] for s in events]
+        short_msgs = [e.event_text for e in events]
         return concat.join(short_msgs)
 
     def long_messages(self, events, concat="\n\t- "):
-        long_msgs = [s[1] for s in events]
+        long_msgs = [e.event_longtext for e in events]
         m = concat.join(long_msgs)
         long_s = "_"*50 + "\n{nb} Event(s) signaled:{concat}{msgs}" + "\n" + "_"*50 + "\n\n"
         return long_s.format(nb=len(long_msgs), concat=concat, msgs=m)
@@ -198,38 +199,46 @@ class SimpleTickerDataFeed(DataFeedService):
         # response = r
         return response
 
-class Events(object):
-    """Holds Events related to Ticker tracker as a list of tuple(short_msg, long_msg)
-    """
-    def __init__(self, one_event=None):
-        self.events = []
-        if one_event:
-            self.events.append(one_event)
+# class Events(list):
+#     """Holds Events related to Ticker tracker as a list of tuple(short_msg, long_msg)
+#     """
+#     def __init__(self, one_event=None):
+#         self.events = []
+#         if one_event:
+#             if not isinstance(one_event, tuple):
+#                 raise Exception("Invalid event {}".format(one_event))
+#             self.events.append(one_event)
+
+#     def add_event(self, short_msg, long_msg):
+#         self.append((short_msg, long_msg))
+
+#     @property
+#     def is_empty(self):
+#         return len(self.events) == 0
+
+#     def __iter__(self):
+#         return iter(self.events)
+
+class Event(object):
+    def __init__(self, format_text, format_longtext=None, **text_values):
+        self.format_text = format_text
+        if format_longtext:
+            self.format_longtext = format_longtext
+        else:
+            self.format_longtext = format_text
+
+        for v in text_values:
+            setattr(self, v, text_values[v])
 
     @property
-    def is_empty(self):
-        return len(self.events) == 0
+    def event_text(self):
+        return self.format_text.format(**self.__dict__)
 
-    def __iter__(self):
-        return iter(self.events)
+    @property
+    def event_longtext(self):
+        return self.format_longtext.format(**self.__dict__)
 
-class EventsTicker(Events):
-    range_l = "Pair {t.symbol} at {t.current:.3f} (prev={prev.current:.3f}) {a} ({dir}) the range [{r[0]:.3f}-{r[1]:.3f}]"
-    range_s = "{t.symbol} {t.current:.3f} (prev={prev.current:.3f}) {a}{dir} [{r[0]:.3f}-{r[1]:.3f}]"
-    change_l = "Pair {t.symbol} at {t.current:.3f} changes {t.day_change:.2f}% from open value {t.open}"
-    change_s = "{t.symbol} {t.current:.3f} changes {t.day_change:.2f}% from open {t.open}"
-    dir_symbol = {'down': '\u2193', 'up': '\u2191'}
-    
-    def add_range_event(self, ticker, prev_ticker, action, range):
-        direction = ticker.direction(prev_ticker)
-        msg = self.range_l.format(t=ticker, prev=prev_ticker, a=action, dir=direction, r=range) 
-        short_msg = self.range_s.format(t=ticker, prev=prev_ticker, a=action, dir=self.dir_symbol[direction], r=range) 
-        self.events.append((short_msg, msg))
 
-    def add_change_event(self, ticker):
-        msg = self.change_l.format(t=ticker)
-        short_msg = self.change_s.format(t=ticker)
-        self.events.append((short_msg, msg))
 
 class EventTracker(object):
     """AbstractClass that track events and signal them.
@@ -263,80 +272,110 @@ class EventTracker(object):
 
 
 class TickerEventTracker(EventTracker):
-
-    def signal_range_event(self):
-        if not self.prev_ticker or not self.lo:
-            return None
-        action = None
-        if not self.prev_ticker.inside(self.lo, self.hi) and self.ticker.inside(self.lo, self.hi):
-            action = 'enter'
-        if self.prev_ticker.inside(self.lo, self.hi) and not self.ticker.inside(self.lo, self.hi):
-            action = 'exit'
-        if not self.prev_ticker.inside(self.lo, self.hi) and not self.ticker.inside(self.lo, self.hi):
-            if self.prev_ticker.current <= self.lo and self.ticker.current >= self.hi or \
-               self.prev_ticker.current >= self.hi and self.ticker.current <= self.lo:
-                action = 'cross'
-        return action
-
-    def signal_change_event(self):
-        action = None
-        if self.max_daily and self.ticker.day_change >= self.max_daily:
-            action = 'max_daily'
-        if self.min_daily and self.ticker.day_change <= self.min_daily:
-            action = 'min_daily'
-        return action
+    dir_symbol = {'down': '\u2193', 'up': '\u2191'}
 
     def __init__(self, symbol, **params):
         self.symbol = symbol
         self.params = params
 
     def _setup(self):
-        if not self.params.get('lo') and not self.params.get('hi'):
+        """Supported param, ex :
+            - lo: 1.0, hi: 2.0 (track entering/exiting range between 1.0 and 2.0)
+            - change_day: 5.0 (track daily change exceeding +/- 5.0%)
+            - change_lag: [2.0, -3] (track change exceeding +/- 2.0% between current and last-3 ticker)
+        """
+        self.lo = float(self.params.get('lo', 0.0))
+        self.hi = float(self.params.get('hi', float('inf')))
+        if self.lo == 0.0 and self.hi == float('inf'):
             self.lo = None
             self.hi = None
-        elif self.params.get('lo') and not self.params.get('hi'):
-            self.lo = float(self.params['lo'])
-            self.hi = float('inf')
-        elif not self.params.get('lo') and self.params.get('hi'):
-            self.hi = float(self.params['hi'])
-            self.lo = 0.0
-        else:
-            self.lo = float(self.params['lo'])
-            self.hi = float(self.params['hi'])
-        self.max_daily = self.params.get('max_daily', None)
-        self.min_daily = self.params.get('min_daily', None)
+        self.change_day = self.params.get('change_day', None)
+        self.change_lag = self.params.get('change_lag', None)
+        
+        # keeps track of previous 100 ticker 
+        self.tickers = deque(maxlen=100)
 
-        self.ticker = None
-
-        # last time for range-events
+        # last time specific events took place
         self.lastime_rangevents = dict(enter_up=0, enter_down=0, exit_up=0, exit_down=0, cross_up=0, cross_down=0)
-        # last time for change-event
-        self.lastime_changevents = dict(max_daily=0, min_daily=0) 
+        self.lastime_changeday = 0
+        self.lastime_changelag = 0
+
+    def range_event(self):
+        #msg_l = "Pair {t.symbol} at {t.current:.3f} (prev={prev.current:.3f}) {a} ({dir}) the range [{r[0]:.3f}-{r[1]:.3f}]"
+        # msg_s = "{t.symbol} {t.current:.3f} (prev={prev.current:.3f}) {a}{dir} [{r[0]:.3f}-{r[1]:.3f}]"
+        if not self.lo:
+            return None
+
+        action = self.current_ticker.range_action(previous_ticker=self.previous_ticker, hi=self.hi, lo=self.lo)
+        if action:
+            return Event("{symbol} at {price:.3f} (prev={prev_price:.3f}) {action}{dir} [{range[0]:.3f}-{range[1]:.3f}]",
+                          symbol=self.current_ticker.symbol,
+                          price=self.current_ticker.current,
+                          prev_price=self.previous_ticker.current,
+                          action=action,
+                          dir=self.dir_symbol[self.current_ticker.direction(self.previous_ticker)],
+                          range=(self.lo, self.hi) )
+
+
+    def changeday_event(self):
+        # msg_l = "Pair {t.symbol} at {t.current:.3f} changes {t.day_change:.2f}% from open value {t.open}"
+        # msg_s = "{t.symbol} {t.current:.3f} changes {t.day_change:.2f}% from open {t.open}"
+        if not self.change_day:
+            return None
+
+        if not (-self.change_day < self.current_ticker.open_change < self.change_day):
+            return Event("{symbol} at {price:.3f} changes {open_change:.2f}% from open {open}",
+                         symbol=self.current_ticker.symbol,
+                         price=self.current_ticker.current,
+                         open_change=self.current_ticker.open_change,
+                         open=self.current_ticker.open)
+
+
+    def changelag_event(self):
+        # msg_l = "Pair {t.symbol} at {t.current:.3f} changes {change:.2f}% from lag-{lag} value {value}"
+        # msg_s = "{t.symbol} {t.current:.3f} changes {change:.2f}% from lag-{lag}"
+        if not self.change_lag or len(self.tickers) <= self.change_lag[1]*-1:
+            return None
+        
+        lag_value = self.tickers[self.change_lag[1]-1].current
+        change = (self.current_ticker.current - lag_value) / lag_value * 100.0
+        if not (-self.change_lag[0] < change < self.change_lag[0]):
+            return  Event("{symbol} at {price:.3f} changes {change:.2f}% from lag{lag}",
+                          symbol=self.current_ticker.symbol,
+                          price=self.current_ticker.current,
+                          change=change,
+                          lag=self.change_lag[1])
 
     def signal_events(self, response):
-        ticker = ticker_response_adapter(response, self.symbol, self.datafeed_service.url)
-        if ticker:
-            self.prev_ticker = self.ticker
-            self.ticker = ticker
-            
-            evts = EventsTicker()
-            range_evt = self.signal_range_event()
-            if range_evt:
-                rkey = range_evt + "_" + self.ticker.direction(self.prev_ticker)
-                last_rtime = self.lastime_rangevents[rkey]
-                if self.ticker.timestamp - last_rtime > self.wait_time:
-                    evts.add_range_event(self.ticker, self.prev_ticker, action=range_evt, range=(self.lo, self.hi))
-                    self.lastime_rangevents[rkey] = self.ticker.timestamp
+        self.tickers.append(ticker_response_adapter(response, self.symbol, self.datafeed_service.url))
+        evts = list()
 
-            change_evt = self.signal_change_event()
-            if change_evt:
-                last_ctime = self.lastime_changevents[change_evt]
-                if self.ticker.timestamp - last_ctime > self.wait_time:
-                    evts.add_change_event(self.ticker)
-                    self.lastime_changevents[change_evt] = self.ticker.timestamp
-            if evts.is_empty:
-                print("No event signaled for {}".format(self.ticker))
-            return evts
+        self.current_ticker = self.tickers[-1]
+        self.previous_ticker = self.tickers[-2] if len(self.tickers) > 1 else None
+
+        range_evt = self.range_event()
+        if range_evt:
+            rkey = range_evt.action + "_" + self.current_ticker.direction(self.previous_ticker)
+            last_rtime = self.lastime_rangevents[rkey]
+            if self.current_ticker.timestamp - last_rtime > self.wait_time:
+                evts.append(range_evt)
+                self.lastime_rangevents[rkey] = self.current_ticker.timestamp
+
+        changeday_evt = self.changeday_event()
+        if changeday_evt:
+            if self.current_ticker.timestamp - self.lastime_changeday > self.wait_time:
+                evts.append(changeday_evt)
+                self.lastime_changeday = self.current_ticker.timestamp
+
+        changelag_evt = self.changelag_event()
+        if changelag_evt:
+            if self.current_ticker.timestamp - self.lastime_changelag > self.wait_time:
+                evts.append(changelag_evt)
+                self.lastime_changelag = self.current_ticker.timestamp
+
+        if len(evts) == 0:
+            print("No event signaled for {}".format(self.current_ticker))
+        return evts
 
 
 
@@ -365,7 +404,7 @@ def ticker_response_adapter(response, symbol, service_url):
                       vwap=     response.get('vwap',-1))
     elif service_url.lower().find('kraken') > -1:
         if len(response['result'].keys()) != 1:
-            print("Ignore unexpected response '{}', received by {}".format(response['result'], service_url))
+            raise Exception("Adapter received Unexpected response '{}' from  {}".format(response['result'], service_url))
         else:
             symbol_key = list(response['result'].keys())[0]
             values = dict(current=  response['result'][symbol_key]['c'][0],
@@ -377,9 +416,8 @@ def ticker_response_adapter(response, symbol, service_url):
                       ask=      response['result'][symbol_key]['a'][0],
                       vwap=     response['result'][symbol_key]['p'][1])
     else:
-        raise Exception("Unsupported service:{}".format(service_url))
-    if values: 
-        return Ticker(symbol, values)
+        raise Exception("Adapter does not support this service '{}'".format(service_url))
+    return Ticker(symbol, values)
     
 
 class Ticker(object):
@@ -400,14 +438,16 @@ class Ticker(object):
         # OHLC values and other possible values
         self.set_float_values(values, ('high','low','volume','bid','ask','vwap','mid'))
 
-        
     def set_float_values(self, values, keys):
         for k in keys:
             setattr(self, k, float(values.get(k,-1)))
 
     @property
-    def day_change(self):
+    def open_change(self):
         return (self.current - self.open) / self.open * 100.0
+
+    def change(self, prev_ticker):
+        return (self.current - prev_ticker.current) / prev_ticker.current * 100.0
 
     def inside(self, range_lo, range_hi):
         return range_lo < self.current < range_hi
@@ -420,33 +460,46 @@ class Ticker(object):
         elif self.current < prev_ticker.current:
             return 'down'
         else:
-            return 'flat'  
+            return 'flat'
+
+    def range_action(self, previous_ticker, hi, lo):
+        action = None
+        if not previous_ticker:
+            return action
+        elif not previous_ticker.inside(lo, hi) and self.inside(lo, hi):
+            action = 'enter'
+        elif previous_ticker.inside(lo, hi) and not self.inside(lo, hi):
+            action = 'exit'
+        elif not previous_ticker.inside(lo, hi) and not self.inside(lo, hi):
+            if previous_ticker.current <= lo and self.current >= hi or \
+               previous_ticker.current >= hi and self.current <= lo:
+                action = 'cross'
+        return action
 
     def __str__(self):
         n = datetime.fromtimestamp(self.timestamp)
         return "Ticker {t.symbol} at {t.current:.3f} (open={t.open:.3f}, vol={t.volume:.1f}, utc-time={now})".format(t=self, now=n)
 
 
-gdrive = None
 
-def setup_gdrive():
-    global gdrive
-    if not gdrive:
-        gauth = GoogleAuth()
-        print("Need to authenticate Google-drive access")
-        #this opens a web client for authentication, impossible to use on headless server
-        gauth.LocalWebserverAuth()
-        #this could work, but probably beed to change my OAuth from Web app to 'Other client' (redo the pydrive init)
-        #gauth.CommandLineAuth()
-        gdrive = GoogleDrive(gauth)
+# gdrive = None
+# def setup_gdrive():
+#     global gdrive
+#     if not gdrive:
+#         gauth = GoogleAuth()
+#         print("Need to authenticate Google-drive access")
+#         #this opens a web client for authentication, impossible to use on headless server
+#         gauth.LocalWebserverAuth()
+#         #this could work, but probably beed to change my OAuth from Web app to 'Other client' (redo the pydrive init)
+#         #gauth.CommandLineAuth()
+#         gdrive = GoogleDrive(gauth)
 
-gdrive_file = None
-
-def setup_gdrive_file(file_id):
-    setup_gdrive()
-    global gdrive_file
-    gdrive_file = gdrive.CreateFile({'id': file_id})
-    return gdrive_file
+# gdrive_file = None
+# def setup_gdrive_file(file_id):
+#     setup_gdrive()
+#     global gdrive_file
+#     gdrive_file = gdrive.CreateFile({'id': file_id})
+#     return gdrive_file
         
 def get_yaml_content(args):
     if args.local_yaml:
@@ -489,7 +542,7 @@ def setup_bot(yaml_content):
     return bot
     
 def get_args():
-    parser = argparse.ArgumentParser(description="Bot managing EventTracker(s) and sending their events to NotificationService(s) based on yaml config file")
+    parser = argparse.ArgumentParser(description="Bot to launch EventTracker(s) (defined in yaml config)")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("-l", "--local_yaml", nargs="?", const="./yaml_conf/tracker_conf.yaml", help="Local Yaml filepath")
     group.add_argument("-g", "--gdrive_yaml", nargs="?", const="1Ac8hQrAkM5OdozdQ_JiS8IXIx7mwb1Dr", help="Google drive Yaml file-Id")
