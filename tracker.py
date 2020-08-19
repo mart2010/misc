@@ -56,10 +56,11 @@ class Bot(object):
         err_msg = None
         try:
             service_response = tracker.datafeed_service.request(request_params=request_p)
-            events_msg = tracker.signal_events(service_response)
         except Exception as e:
-            err_msg = "run_tracker failed"
-            events_msg = Events(one_event=(err_msg, str(e)))
+            events_msg = list()
+            events_msg.append(Event("Bot tracker error: {error}", error= str(e)))
+
+        events_msg = tracker.signal_events(service_response)
 
         for n in self.notification_services:
             n.notify(events_msg)
@@ -84,7 +85,7 @@ class NotificationService(object):
             self._setup()
 
     def notify(self, events):
-        if self.active and not events.is_empty:
+        if self.active and len(events) > 0:
             try:
                 self._notify(events)
             except Exception as e: 
@@ -96,18 +97,18 @@ class NotificationService(object):
         pass
 
     def short_messages(self, events, concat=" || "):
-        short_msgs = [e.event_text for e in events]
+        short_msgs = [e.text for e in events]
         return concat.join(short_msgs)
 
     def long_messages(self, events, concat="\n\t- "):
-        long_msgs = [e.event_longtext for e in events]
+        long_msgs = [e.longtext for e in events]
         m = concat.join(long_msgs)
-        long_s = "_"*50 + "\n{nb} Event(s) signaled:{concat}{msgs}" + "\n" + "_"*50 + "\n\n"
+        long_s = "_"*75 + "\n{nb} Event(s) signaled:{concat}{msgs}" + "\n" + "_"*75 + "\n\n"
         return long_s.format(nb=len(long_msgs), concat=concat, msgs=m)
 
 class ConsolNotificationService(NotificationService):
     def _notify(self, events):
-        print("Short message--> " + self.short_messages(events))
+        #print("Short message--> " + self.short_messages(events))
         print("Long message-->\n" + self.long_messages(events))
 
 
@@ -184,40 +185,22 @@ class SimpleTickerDataFeed(DataFeedService):
     def request(self, request_params):
         complete_url = self.url.format(**request_params)
 
-        r = requests.get(complete_url)
-        if r.status_code != requests.codes.ok:
-            raise Exception("Request {} response not 200-OK: {}".format(complete_url, r))
-        response = r.json()
+        # r = requests.get(complete_url)
+        # if r.status_code != requests.codes.ok:
+        #     raise Exception("Request {} response not 200-OK: {}".format(complete_url, r))
+        # response = r.json()
+
         # mock-up for test..
-        # import random
-        # p = str(random.uniform(2.0, 2.2))
-        # t = str(datetime.now().timestamp())
-        # if self.url.find('bitstamp') > -1:
-        #     r = {"last": p, "timestamp": t, "volume": "8000", "open": "1.5", "high": "1", "bid": "1", "vwap":"1", "low":"1", "ask":"1"}
-        # elif self.url.find('kraken') > -1:
-        #     r = {"error":[],"result":{"XTZUSD":{"a":["1.963400","1135","1135.000"],"b":["1.960200","829","829.000"],"c":[p,"169.08065753"],"v":["162651.08050865","733026.03677556"],"p":["1.929881","1.904369"],"t":["397","1553"],"l":["1.896800","1.894300"],"h":["1.993500","2.007000"],"o":"1.5"}}}
-        # response = r
+        import random
+        p = str(random.uniform(2.0, 2.2))
+        t = str(datetime.now().timestamp())
+        if self.url.find('bitstamp') > -1:
+            r = {"last": p, "timestamp": t, "volume": "8000", "open": "1.5", "high": "1", "bid": "1", "vwap":"1", "low":"1", "ask":"1"}
+        elif self.url.find('kraken') > -1:
+            r = {"error":[],"result":{"XTZUSD":{"a":["1.963400","1135","1135.000"],"b":["1.960200","829","829.000"],"c":[p,"169.08065753"],"v":["162651.08050865","733026.03677556"],"p":["1.929881","1.904369"],"t":["397","1553"],"l":["1.896800","1.894300"],"h":["1.993500","2.007000"],"o":"1.5"}}}
+        response = r
         return response
 
-# class Events(list):
-#     """Holds Events related to Ticker tracker as a list of tuple(short_msg, long_msg)
-#     """
-#     def __init__(self, one_event=None):
-#         self.events = []
-#         if one_event:
-#             if not isinstance(one_event, tuple):
-#                 raise Exception("Invalid event {}".format(one_event))
-#             self.events.append(one_event)
-
-#     def add_event(self, short_msg, long_msg):
-#         self.append((short_msg, long_msg))
-
-#     @property
-#     def is_empty(self):
-#         return len(self.events) == 0
-
-#     def __iter__(self):
-#         return iter(self.events)
 
 class Event(object):
     def __init__(self, format_text, format_longtext=None, **text_values):
@@ -231,11 +214,11 @@ class Event(object):
             setattr(self, v, text_values[v])
 
     @property
-    def event_text(self):
+    def text(self):
         return self.format_text.format(**self.__dict__)
 
     @property
-    def event_longtext(self):
+    def longtext(self):
         return self.format_longtext.format(**self.__dict__)
 
 
@@ -281,16 +264,19 @@ class TickerEventTracker(EventTracker):
     def _setup(self):
         """Supported param, ex :
             - lo: 1.0, hi: 2.0 (track entering/exiting range between 1.0 and 2.0)
-            - change_day: 5.0 (track daily change exceeding +/- 5.0%)
-            - change_lag: [2.0, -3] (track change exceeding +/- 2.0% between current and last-3 ticker)
+            - max_day: 5.0 (track daily change exceeding +/- 5.0%)
+            - max_lag: [2.0, -3] (track change exceeding +/- 2.0% between current and lag-3 ticker)
         """
         self.lo = float(self.params.get('lo', 0.0))
         self.hi = float(self.params.get('hi', float('inf')))
         if self.lo == 0.0 and self.hi == float('inf'):
             self.lo = None
             self.hi = None
-        self.change_day = self.params.get('change_day', None)
-        self.change_lag = self.params.get('change_lag', None)
+        self.max_day = float(self.params['max_day']) if self.params.get('max_day') else None
+        self.max_lag = float(self.params['max_lag'][0]) if self.params.get('max_lag') else None
+        if self.max_lag:
+            self.lag = int(self.params['max_lag'][1])
+
         
         # keeps track of previous 100 ticker 
         self.tickers = deque(maxlen=100)
@@ -320,10 +306,10 @@ class TickerEventTracker(EventTracker):
     def changeday_event(self):
         # msg_l = "Pair {t.symbol} at {t.current:.3f} changes {t.day_change:.2f}% from open value {t.open}"
         # msg_s = "{t.symbol} {t.current:.3f} changes {t.day_change:.2f}% from open {t.open}"
-        if not self.change_day:
+        if not self.max_day:
             return None
 
-        if not (-self.change_day < self.current_ticker.open_change < self.change_day):
+        if not (-self.max_day < self.current_ticker.open_change < self.max_day):
             return Event("{symbol} at {price:.3f} changes {open_change:.2f}% from open {open}",
                          symbol=self.current_ticker.symbol,
                          price=self.current_ticker.current,
@@ -333,18 +319,22 @@ class TickerEventTracker(EventTracker):
 
     def changelag_event(self):
         # msg_l = "Pair {t.symbol} at {t.current:.3f} changes {change:.2f}% from lag-{lag} value {value}"
-        # msg_s = "{t.symbol} {t.current:.3f} changes {change:.2f}% from lag-{lag}"
-        if not self.change_lag or len(self.tickers) <= self.change_lag[1]*-1:
+        # msg_s = "{t.symbol} {t.current:.3f} changes {change:.2f}% from lag-{lag_value:.3f}"
+        if not self.max_lag:
             return None
-        
-        lag_value = self.tickers[self.change_lag[1]-1].current
-        change = (self.current_ticker.current - lag_value) / lag_value * 100.0
-        if not (-self.change_lag[0] < change < self.change_lag[0]):
-            return  Event("{symbol} at {price:.3f} changes {change:.2f}% from lag{lag}",
-                          symbol=self.current_ticker.symbol,
-                          price=self.current_ticker.current,
-                          change=change,
-                          lag=self.change_lag[1])
+        else:
+            if len(self.tickers) <= self.lag * -1:
+                return None
+
+            lag_value = self.tickers[self.lag-1].current
+            change = (self.current_ticker.current - lag_value) / lag_value * 100.0
+            if not (-1 * self.max_lag < change < self.max_lag):
+                return  Event("{symbol} at {price:.3f} changes {change:.2f}% from lag{lag}({lag_value:.3f})",
+                              symbol=self.current_ticker.symbol,
+                              price=self.current_ticker.current,
+                              change=change,
+                              lag=self.lag,
+                              lag_value=lag_value)
 
     def signal_events(self, response):
         self.tickers.append(ticker_response_adapter(response, self.symbol, self.datafeed_service.url))
@@ -561,7 +551,7 @@ if __name__ == '__main__':
                 schedule.run_pending()
             else:
                 del(bot)
-                print("Yaml config file was modified, resetting the Bot!")
+                print("Yaml config file was modified, relaunching the Bot!")
                 yaml_content = get_yaml_content(args)
                 bot = setup_bot(yaml_content)
                 last_yaml_update = m_date

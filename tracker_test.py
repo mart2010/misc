@@ -7,7 +7,7 @@ def test_tickerEventTracker():
 
     fivemin_ago = datetime.now().timestamp() - 60*5
     pair = 'XTZUSD'
-    tracker = TickerEventTracker(pair, lo=1.1, hi=1.2, change_day=10.0, change_lag=[20.0, -1])
+    tracker = TickerEventTracker(pair, lo=1.1, hi=1.2, max_day=10.0, max_lag=[20.0, -1])
 
     mockservice = SimpleTickerDataFeed()
     mockservice.url = "bitstamp"
@@ -28,7 +28,7 @@ def test_tickerEventTracker():
     msgs = tracker.signal_events(resp2)
     assert msgs[0].event_text == 'XTZUSD at 1.101 (prev=0.910) enter{} [1.100-1.200]'.format(tracker.dir_symbol['up'])
     assert msgs[1].event_text == 'XTZUSD at 1.101 changes 10.10% from open 1.0'
-    assert msgs[2].event_text == 'XTZUSD at 1.101 changes 20.99% from lag-1'
+    assert msgs[2].event_text == 'XTZUSD at 1.101 changes 20.99% from lag-1(0.910)'
     assert len(msgs) == 3
     
     # "{symbol} at {price:.3f} changes {change:.2f}% from lag-{lag}"
@@ -49,7 +49,7 @@ def test_tickerEventTracker():
     msgs = tracker.signal_events(resp5)
     assert msgs[0].event_text == 'XTZUSD at 0.800 (prev=1.150) exit{} [1.100-1.200]'.format(tracker.dir_symbol['down'])
     assert msgs[1].event_text == 'XTZUSD at 0.800 changes -20.00% from open 1.0'
-    assert msgs[2].event_text == 'XTZUSD at 0.800 changes -30.43% from lag-1'
+    assert msgs[2].event_text == 'XTZUSD at 0.800 changes -30.43% from lag-1(1.150)'
     assert len(msgs) == 3
 
     # 6 cross (new event) and exceeded change_day 
@@ -57,6 +57,6 @@ def test_tickerEventTracker():
     msgs = tracker.signal_events(resp6)
     assert msgs[0].event_text == 'XTZUSD at 1.500 (prev=0.800) cross{} [1.100-1.200]'.format(tracker.dir_symbol['up'])
     assert msgs[1].event_text == 'XTZUSD at 1.500 changes 50.00% from open 1.0'
-    assert msgs[2].event_text == 'XTZUSD at 1.500 changes 87.50% from lag-1'
+    assert msgs[2].event_text == 'XTZUSD at 1.500 changes 87.50% from lag-1(0.800)'
     assert len(msgs) == 3
 
