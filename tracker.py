@@ -28,9 +28,6 @@ class Bot(object):
         self.event_trackers = event_trackers
 
     def setup(self):
-        if not hasattr(self, 'sleep_period'):
-            self.sleep_period = 60
-
         for n in self.notification_services:
             n.setup()
         for s in self.datafeed_services:
@@ -41,15 +38,23 @@ class Bot(object):
 
     def schedule_trackers(self):
         schedule.clear()
-        
+        # set all tracker defined in yaml to run
         for r_s in getattr(self, 'run_schedules', []):
             interval_full = r_s['interval']
             interval_time = interval_full.lstrip('0123456789 ')
             assert interval_time in ('seconds','minutes','hours')
             val_int = int(interval_full[:-len(interval_time)])
-            the_tracker = r_s['tracker']
             schedule_scheme = getattr(schedule.every(val_int),interval_time)
+            the_tracker = r_s['tracker']
             schedule_scheme.do(self.run_tracker, the_tracker)
+        
+        # optionally Bot can notify whether it is still active (ex. checkstate_every: "day_at_10:30")
+        if hasattr(self, 'checkstate_every'):
+            scheme_n = self.checkstate_every[:self.checkstate_every.index('_at_')]
+            at_s = self.checkstate_every[self.checkstate_every.index('_at_')+4:]
+            checkstate_scheme = getattr(schedule.every(), scheme_n)
+            print("je uis le scheme {} et l'objet".format(scheme_n))
+            checkstate_scheme.at(at_s).do(self.check_active)
 
     def run_tracker(self, tracker):
         request_p = getattr(tracker, 'request_params', None)
@@ -64,6 +69,12 @@ class Bot(object):
 
         for n in self.notification_services:
             n.notify(events_msg)
+
+    def check_active(self):
+        e = Event("Bot still active", format_longtext=str(self))
+        for n in self.notification_services:
+            n.notify(e)
+
 
     def __str__(self):
         if hasattr(self, 'run_schedules') and len(self.run_schedules) > 0:
@@ -228,12 +239,13 @@ class EventTracker(object):
     The datafeed_service is loosely coupled, it's Bot's responsability to call the datafeed_service 
     and to provide the request_params (when specified by the EventTracker)
     """
-    def __init__(self, datafeed_service, request_params=None):
+    def __init__(self, datafeed_service, request_params=None, **params):
         self.datafeed_service = datafeed_service
         self.request_params = request_params
+        self.params = params
 
     def setup(self):
-        #default is to NEVER wait before signaling same type of event
+        # use ´wait_time´ sec before signaling SAME type of event
         self.wait_time = self.params.get('wait_time',0)
         self._setup()
 
@@ -257,16 +269,13 @@ class EventTracker(object):
 class TickerEventTracker(EventTracker):
     dir_symbol = {'down': '\u2193', 'up': '\u2191'}
 
-    def __init__(self, symbol, **params):
-        self.symbol = symbol
-        self.params = params
-
     def _setup(self):
         """Supported param, ex :
             - lo: 1.0, hi: 2.0 (track entering/exiting range between 1.0 and 2.0)
             - max_day: 5.0 (track daily change exceeding +/- 5.0%)
             - max_lag: [2.0, -3] (track change exceeding +/- 2.0% between current and lag-3 ticker)
         """
+        self.symbol = self.params['symbol']
         self.lo = float(self.params.get('lo', 0.0))
         self.hi = float(self.params.get('hi', float('inf')))
         if self.lo == 0.0 and self.hi == float('inf'):
@@ -277,7 +286,6 @@ class TickerEventTracker(EventTracker):
         if self.max_lag:
             self.lag = int(self.params['max_lag'][1])
 
-        
         # keeps track of previous 100 ticker 
         self.tickers = deque(maxlen=100)
 
@@ -555,7 +563,7 @@ if __name__ == '__main__':
                 yaml_content = get_yaml_content(args)
                 bot = setup_bot(yaml_content)
                 last_yaml_update = m_date
-            time.sleep(bot.sleep_period)
+            time.sleep(1)
     except KeyboardInterrupt:
         pass
     except:
