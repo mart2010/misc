@@ -16,10 +16,11 @@ import time
 import os
 import getpass
 import smtplib, ssl
-from notify_run import Notify
+from pushbullet import Pushbullet
+
+#from notify_run import Notify
 #from pydrive.drive import GoogleDrive
 #from pydrive.auth import GoogleAuth
-
 
 class Bot(object):
     def __init__(self, notification_services, datafeed_services, event_trackers):
@@ -53,7 +54,6 @@ class Bot(object):
             scheme_n = self.checkstate_every[:self.checkstate_every.index('_at_')]
             at_s = self.checkstate_every[self.checkstate_every.index('_at_')+4:]
             checkstate_scheme = getattr(schedule.every(), scheme_n)
-            print("je uis le scheme {} et l'objet".format(scheme_n))
             checkstate_scheme.at(at_s).do(self.check_active)
 
     def run_tracker(self, tracker):
@@ -71,10 +71,10 @@ class Bot(object):
             n.notify(events_msg)
 
     def check_active(self):
-        e = Event("Bot still active", format_longtext=str(self))
+        e_l = list()
+        e_l.append(Event("Bot still active", format_longtext=str(self)))
         for n in self.notification_services:
-            n.notify(e)
-
+            n.notify(e_l)
 
     def __str__(self):
         if hasattr(self, 'run_schedules') and len(self.run_schedules) > 0:
@@ -99,8 +99,9 @@ class NotificationService(object):
         if self.active and len(events) > 0:
             try:
                 self._notify(events)
-            except Exception as e: 
+            except Exception as e:
                 print("{} failed to notify due to error:\n{}".format(self.__class__.__name__, e))
+                raise e
         
     def _setup(self):
         pass
@@ -119,9 +120,8 @@ class NotificationService(object):
 
 class ConsolNotificationService(NotificationService):
     def _notify(self, events):
-        #print("Short message--> " + self.short_messages(events))
+        print("Short message--> " + self.short_messages(events))
         print("Long message-->\n" + self.long_messages(events))
-
 
 class AndroidPushNotificationService(NotificationService):
     """Use notify.run free service "Web Push API" to push notification to 
@@ -135,9 +135,22 @@ class AndroidPushNotificationService(NotificationService):
     def _notify(self, events):
         self.notifier.send(self.short_messages(events))
 
+class PushBulletNotificationService(NotificationService):
+    """ Use pypi library pushbullet.py to send push into phone.
+    Need to register and get an api_key
+    """
+    def _setup(self):
+        # api_key gives access to account, so not to be shared!
+        self.pb = Pushbullet(self.params['api_key'])
+
+    def _notify(self, events):
+        push = self.pb.push_note(self.short_messages(events), self.long_messages(events))
+        print("le retour du push {}".format(push))
+        #if push.status_code != 200:
+        #    raise Exception('Error with PushBulletNotificationService', resp.status_code)
+
 
 pwd_saved = None
-
 class EmailNotificationService(NotificationService):
     """Use smtp server with SSL connection to send email notifications
     """
@@ -191,47 +204,55 @@ class DataFeedService(object):
         atts = ", ".join(['{}:{}'.format(k,v) for k,v in self.__dict__.items()])
         return "'{}' with attributes {}".format(self.__class__.__name__, atts) 
 
-
 class SimpleTickerDataFeed(DataFeedService):
     def request(self, request_params):
         complete_url = self.url.format(**request_params)
 
-        # r = requests.get(complete_url)
-        # if r.status_code != requests.codes.ok:
-        #     raise Exception("Request {} response not 200-OK: {}".format(complete_url, r))
-        # response = r.json()
+        r = requests.get(complete_url)
+        if r.status_code != requests.codes.ok:
+            raise Exception("Request {} response not 200-OK: {}".format(complete_url, r))
+        response = r.json()
 
-        # mock-up for test..
-        import random
-        p = str(random.uniform(2.0, 2.2))
-        t = str(datetime.now().timestamp())
-        if self.url.find('bitstamp') > -1:
-            r = {"last": p, "timestamp": t, "volume": "8000", "open": "1.5", "high": "1", "bid": "1", "vwap":"1", "low":"1", "ask":"1"}
-        elif self.url.find('kraken') > -1:
-            r = {"error":[],"result":{"XTZUSD":{"a":["1.963400","1135","1135.000"],"b":["1.960200","829","829.000"],"c":[p,"169.08065753"],"v":["162651.08050865","733026.03677556"],"p":["1.929881","1.904369"],"t":["397","1553"],"l":["1.896800","1.894300"],"h":["1.993500","2.007000"],"o":"1.5"}}}
-        response = r
+        # or mock-up for test..
+        # response = mockup_response(self.url)
         return response
 
+def mockup_response(url):
+    import random
+    p = str(random.uniform(2.0, 2.2))
+    t = str(datetime.now().timestamp())
+    if url.find('bitstamp') > -1:
+        r = {"last": p, "timestamp": t, "volume": "8000", "open": "1.5", "high": "1", "bid": "1", "vwap":"1", "low":"1", "ask":"1"}
+    elif url.find('kraken') > -1:
+        r = {"error":[],"result":{"XTZUSD":{"a":["1.963400","1135","1135.000"],"b":["1.960200","829","829.000"],"c":[p,"169.08065753"],"v":["162651.08050865","733026.03677556"],"p":["1.929881","1.904369"],"t":["397","1553"],"l":["1.896800","1.894300"],"h":["1.993500","2.007000"],"o":"1.5"}}}
+    return r
 
 class Event(object):
-    def __init__(self, format_text, format_longtext=None, **text_values):
+    def __init__(self, format_text, format_longtext=None, **kwargs):
         self.format_text = format_text
         if format_longtext:
             self.format_longtext = format_longtext
         else:
             self.format_longtext = format_text
-
-        for v in text_values:
-            setattr(self, v, text_values[v])
+        
+        self.has_keyword = False
+        for v in kwargs:
+            self.has_keyword = True
+            setattr(self, v, kwargs[v])
 
     @property
     def text(self):
-        return self.format_text.format(**self.__dict__)
+        if self.has_keyword:
+            return self.format_text.format(**self.__dict__)
+        else:
+            return self.format_text
 
     @property
     def longtext(self):
-        return self.format_longtext.format(**self.__dict__)
-
+        if self.has_keyword:
+            return self.format_longtext.format(**self.__dict__)
+        else:
+            return self.format_longtext
 
 
 class EventTracker(object):
@@ -378,16 +399,16 @@ class TickerEventTracker(EventTracker):
 
 
 def ticker_response_adapter(response, symbol, service_url):
-    # Bitstamp: high->Last 24h high, low->Last 24h low, last->Last price, open->First of the day, bid->Highest buy order, ask->Lowest sell order, volume-> Last 24h vol, vwap->Last 24h vol weighted average price, timestamp->Unix timestamp date and time
-    #   {"high","last", "timestamp", "bid", "vwap", "volume", "low", "ask", "open"}
-    # Bitfinex: mid-> (bid+ask)/2, bid:bid, ask:ask, last_price:last order price, low:lowest since 24hrs, high:highest since 24hrs, volume:vol last 24h, timestamp:timestamp
-    #   check all symbols supported: https://api.bitfinex.com/v1/symbols
-    #   {"mid", "bid", "ask", "last_price", "low", "high", "volume", "timestamp"
-    # Kraken: a:ask array, b:bid array, c:last price array, v:vol array, p:vol weighted array, t:nb of trade array, l:low array, h:high array, o:today's opening price
-    # check all symbols: https://api.kraken.com/0/public/AssetPairs
-    # {"error":[],"result":{"XXBTZUSD":{"a":["","",""],"b":["6.7","3","3.0"],"c":["6.3","0.087"],"v":["6.5","96."],"p":["7.8","71.7"],"t":[1,2],"l":["6.1","6.1"],"h":["7.5","7.0"],"o":"7.1"}}}
-    # {"error":[],"result":{"XTZUSD":{"a":["1.963400","1135","1135.000"],"b":["1.960200","829","829.000"],"c":["1.953400","169.08065753"],"v":["162651.08050865","733026.03677556"],"p":["1.929881","1.904369"],"t":[397,1553],"l":["1.896800","1.894300"],"h":["1.993500","2.007000"],"o":"1.974000"}}}
-    
+    """ Bitstamp: high->Last24h high, low->Last24h low, last->Last price, open->First of day, bid->Highest buy order, ask->Lowest sell order, volume-> Last24h vol, vwap->Last-24h vol weighted avg price, timestamp->Unix t
+                    {"high","last", "timestamp", "bid", "vwap", "volume", "low", "ask", "open"}
+        Bitfinex: mid-> (bid+ask)/2, bid:bid, ask:ask, last_price:last order price, low:lowest since 24hr, high:highest since 24hr, volume:vol last 24h, timestamp:timestamp
+            check all symbols supported: https://api.bitfinex.com/v1/symbols
+            {"mid", "bid", "ask", "last_price", "low", "high", "volume", "timestamp"
+        Kraken: a:ask array, b:bid array, c:last price array, v:vol array, p:vol weighted array, t:nb of trade array, l:low array, h:high array, o:today's opening price
+            check all symbols: https://api.kraken.com/0/public/AssetPairs
+            {"error":[],"result":{"XXBTZUSD":{"a":["","",""],"b":["6.7","3","3.0"],"c":["6.3","0.087"],"v":["6.5","96."],"p":["7.8","71.7"],"t":[1,2],"l":["6.1","6.1"],"h":["7.5","7.0"],"o":"7.1"}}}
+            {"error":[],"result":{"XTZUSD":{"a":["1.963400","1135","1135.000"],"b":["1.960200","829","829.000"],"c":["1.953400","169.08065753"],"v":["162651.08050865","733026.03677556"],"p":["1.929881","1.904369"],"t":[397,1553],"l":["1.896800","1.894300"],"h":["1.993500","2.007000"],"o":"1.974000"}}}
+    """
     # Adapt custom responses
     values = None
     if service_url.lower().find('bitstamp') > -1:
@@ -479,7 +500,6 @@ class Ticker(object):
         return "Ticker {t.symbol} at {t.current:.3f} (open={t.open:.3f}, vol={t.volume:.1f}, utc-time={now})".format(t=self, now=n)
 
 
-
 # gdrive = None
 # def setup_gdrive():
 #     global gdrive
@@ -532,7 +552,7 @@ def setup_bot(yaml_content):
     yaml = ruamel.yaml.YAML()
     register_classes((Bot, NotificationService, 
                     ConsolNotificationService, EmailNotificationService, AndroidPushNotificationService,
-                    DataFeedService, SimpleTickerDataFeed, 
+                    PushBulletNotificationService, DataFeedService, SimpleTickerDataFeed, 
                     EventTracker, TickerEventTracker))
     bot = yaml.load(yaml_content)
     bot.setup()
