@@ -29,6 +29,9 @@ class Bot(object):
         self.event_trackers = event_trackers
 
     def setup(self):
+        # optionally Bot can check if it's still active (ex. checkstate_every: "day_at_10:30")
+        self.checkstate_every = getattr(self, 'checkstate_every', None)
+
         for n in self.notification_services:
             n.setup()
         for s in self.datafeed_services:
@@ -49,8 +52,7 @@ class Bot(object):
             the_tracker = r_s['tracker']
             schedule_scheme.do(self.run_tracker, the_tracker)
         
-        # optionally Bot can notify whether it is still active (ex. checkstate_every: "day_at_10:30")
-        if hasattr(self, 'checkstate_every'):
+        if self.checkstate_every:
             scheme_n = self.checkstate_every[:self.checkstate_every.index('_at_')]
             at_s = self.checkstate_every[self.checkstate_every.index('_at_')+4:]
             checkstate_scheme = getattr(schedule.every(), scheme_n)
@@ -434,6 +436,16 @@ def ticker_response_adapter(response, symbol, service_url):
                       bid=      response['result'][symbol_key]['b'][0],
                       ask=      response['result'][symbol_key]['a'][0],
                       vwap=     response['result'][symbol_key]['p'][1])
+    elif service_url.lower().find('bitfinex') > -1:
+        print("response de...:{}".format(response))
+        values = dict(current=  response['last_price'],
+                      open=     response.get('open'),
+                      timestamp=response['timestamp'],
+                      high=     response.get('high',-1),
+                      low=      response.get('low',-1),
+                      volume=   response.get('volume',-1),
+                      bid=      response.get('bid',-1),
+                      ask=      response.get('ask',-1))
     else:
         raise Exception("Adapter does not support this service '{}'".format(service_url))
     return Ticker(symbol, values)
@@ -445,14 +457,12 @@ class Ticker(object):
         if type(values) != dict:
             raise Exception("Unsupported values: {}".format(values))
         
-        # required attributes
         self.current = float(values['current'])
-        self.open = float(values['open'])
-        # use now() when not available
         if values.get('timestamp'):
             self.timestamp = round(float(values['timestamp']))
         else:
             self.timestamp = round(datetime.utcnow().timestamp())
+        self.open = float(values['open']) if values.get('open') else None
 
         # OHLC values and other possible values
         self.set_float_values(values, ('high','low','volume','bid','ask','vwap','mid'))
@@ -463,7 +473,10 @@ class Ticker(object):
 
     @property
     def open_change(self):
-        return (self.current - self.open) / self.open * 100.0
+        if self.open:
+            return (self.current - self.open) / self.open * 100.0
+        else:
+            return 0
 
     def change(self, prev_ticker):
         return (self.current - prev_ticker.current) / prev_ticker.current * 100.0
@@ -497,7 +510,12 @@ class Ticker(object):
 
     def __str__(self):
         n = datetime.fromtimestamp(self.timestamp)
-        return "Ticker {t.symbol} at {t.current:.3f} (open={t.open:.3f}, vol={t.volume:.1f}, utc-time={now})".format(t=self, now=n)
+        if self.open:
+            o_s = "open={t.open:.3f}, "
+        else:
+            o_s = "open=NA, "
+        t_s = "Ticker {t.symbol} at {t.current:.3f} (" + o_s + "vol={t.volume:.1f}, utc-time={now})"   
+        return t_s.format(t=self, now=n)
 
 
 # gdrive = None
