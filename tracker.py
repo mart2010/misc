@@ -210,23 +210,23 @@ class SimpleTickerDataFeed(DataFeedService):
     def request(self, request_params):
         complete_url = self.url.format(**request_params)
 
-        r = requests.get(complete_url)
-        if r.status_code != requests.codes.ok:
-            raise Exception("Request {} response not 200-OK: {}".format(complete_url, r))
-        response = r.json()
+        # r = requests.get(complete_url)
+        # if r.status_code != requests.codes.ok:
+        #     raise Exception("Request {} response not 200-OK: {}".format(complete_url, r))
+        # response = r.json()
 
         # or mock-up for test..
-        # response = mockup_response(self.url)
+        response = mockup_response(self.url)
         return response
 
 def mockup_response(url):
     import random
-    p = str(random.uniform(2.0, 2.2))
+    p = str(random.uniform(3.5, 4.5))
     t = str(datetime.now().timestamp())
     if url.find('bitstamp') > -1:
         r = {"last": p, "timestamp": t, "volume": "8000", "open": "1.5", "high": "1", "bid": "1", "vwap":"1", "low":"1", "ask":"1"}
     elif url.find('kraken') > -1:
-        r = {"error":[],"result":{"XTZUSD":{"a":["1.963400","1135","1135.000"],"b":["1.960200","829","829.000"],"c":[p,"169.08065753"],"v":["162651.08050865","733026.03677556"],"p":["1.929881","1.904369"],"t":["397","1553"],"l":["1.896800","1.894300"],"h":["1.993500","2.007000"],"o":"1.5"}}}
+        r = {"error":[],"result":{"XTZUSD":{"a":["1.963400","1135","1135.000"],"b":["1.960200","829","829.000"],"c":[p,"169.08065753"],"v":["162651.08050865","733026.03677556"],"p":["1.929881","1.904369"],"t":["397","1553"],"l":["1.8968","1.8943"],"h":["1.9935","2.007"],"o":"1.5"}}}
     return r
 
 class Event(object):
@@ -293,17 +293,16 @@ class TickerEventTracker(EventTracker):
     dir_symbol = {'down': '\u2193', 'up': '\u2191'}
 
     def _setup(self):
-        """Supported param, ex :
-            - lo: 1.0, hi: 2.0 (track entering/exiting range between 1.0 and 2.0)
+        """Supported events type :
+            - ranges: [1.25-1.50, 2.0-2.2] (track entering/exiting range-zones)
             - max_day: 5.0 (track daily change exceeding +/- 5.0%)
             - max_lag: [2.0, -3] (track change exceeding +/- 2.0% between current and lag-3 ticker)
         """
         self.symbol = self.params['symbol']
-        self.lo = float(self.params.get('lo', 0.0))
-        self.hi = float(self.params.get('hi', float('inf')))
-        if self.lo == 0.0 and self.hi == float('inf'):
-            self.lo = None
-            self.hi = None
+        self.ranges = list()
+        for r in self.params.get('ranges',[]):
+            lo, hi = r.split('-')
+            self.ranges.append(dict(lo=float(lo), hi=float(hi)))
         self.max_day = float(self.params['max_day']) if self.params.get('max_day') else None
         self.max_lag = float(self.params['max_lag'][0]) if self.params.get('max_lag') else None
         if self.max_lag:
@@ -317,13 +316,10 @@ class TickerEventTracker(EventTracker):
         self.lastime_changeday = 0
         self.lastime_changelag = 0
 
-    def range_event(self):
+    def range_event(self, lo, hi):
         #msg_l = "Pair {t.symbol} at {t.current:.3f} (prev={prev.current:.3f}) {a} ({dir}) the range [{r[0]:.3f}-{r[1]:.3f}]"
         # msg_s = "{t.symbol} {t.current:.3f} (prev={prev.current:.3f}) {a}{dir} [{r[0]:.3f}-{r[1]:.3f}]"
-        if not self.lo:
-            return None
-
-        action = self.current_ticker.range_action(previous_ticker=self.previous_ticker, hi=self.hi, lo=self.lo)
+        action = self.current_ticker.range_action(previous_ticker=self.previous_ticker, hi=hi, lo=lo)
         if action:
             return Event("{symbol} at {price:.3f} (prev={prev_price:.3f}) {action}{dir} [{range[0]:.3f}-{range[1]:.3f}]",
                           symbol=self.current_ticker.symbol,
@@ -331,8 +327,7 @@ class TickerEventTracker(EventTracker):
                           prev_price=self.previous_ticker.current,
                           action=action,
                           dir=self.dir_symbol[self.current_ticker.direction(self.previous_ticker)],
-                          range=(self.lo, self.hi) )
-
+                          range=(lo, hi) )
 
     def changeday_event(self):
         # msg_l = "Pair {t.symbol} at {t.current:.3f} changes {t.day_change:.2f}% from open value {t.open}"
@@ -369,18 +364,19 @@ class TickerEventTracker(EventTracker):
 
     def signal_events(self, response):
         self.tickers.append(ticker_response_adapter(response, self.symbol, self.datafeed_service.url))
-        evts = list()
-
         self.current_ticker = self.tickers[-1]
         self.previous_ticker = self.tickers[-2] if len(self.tickers) > 1 else None
+        evts = list()
 
-        range_evt = self.range_event()
-        if range_evt:
-            rkey = range_evt.action + "_" + self.current_ticker.direction(self.previous_ticker)
-            last_rtime = self.lastime_rangevents[rkey]
-            if self.current_ticker.timestamp - last_rtime > self.wait_time:
-                evts.append(range_evt)
-                self.lastime_rangevents[rkey] = self.current_ticker.timestamp
+        for r in self.ranges:
+            range_evt = self.range_event(lo=r['lo'], hi=r['hi'])
+            if range_evt:
+                rkey = range_evt.action + "_" + self.current_ticker.direction(self.previous_ticker)
+                last_rtime = self.lastime_rangevents[rkey]
+                if self.current_ticker.timestamp - last_rtime > self.wait_time:
+                    evts.append(range_evt)
+                    self.lastime_rangevents[rkey] = self.current_ticker.timestamp
+                break
 
         changeday_evt = self.changeday_event()
         if changeday_evt:

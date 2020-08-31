@@ -9,7 +9,7 @@ def test_tickerEventTracker():
     pair = 'XTZUSD'
     mockservice = SimpleTickerDataFeed()
     mockservice.url = "bitstamp"
-    tracker = TickerEventTracker(mockservice, symbol=pair, lo=1.1, hi=1.2, max_day=10.0, max_lag=[20.0, -1])
+    tracker = TickerEventTracker(mockservice, symbol=pair, ranges=['1.1-1.2', '10-12'], max_day=10.0, max_lag=[20.0, -1])
     tracker.setup()
     # reset wait_time
     tracker.wait_time = 60
