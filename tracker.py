@@ -80,7 +80,9 @@ class Bot(object):
 
     def __str__(self):
         if hasattr(self, 'run_schedules') and len(self.run_schedules) > 0:
-            return "Bot has run schedules:\n\t{}".format(self.run_schedules)
+            prefix = "Bot schedules:\n\t\t-"
+            tab_l = [f"{r['tracker']}, refresh every {r['interval']}\n" for r in self.run_schedules]
+            return prefix + "\t\t- ".join(tab_l)
         else:
             return "Bot has no run schedules"
         
@@ -281,12 +283,9 @@ class EventTracker(object):
     def _setup(self):
         pass
 
-    def __str__(self):
+    def __repr__(self):
         atts = ", ".join(['{}:{}'.format(k,v) for k,v in self.__dict__.items()])
         return "'{}' with attributes {}".format(self.__class__.__name__, atts) 
-
-    def __repr__(self):
-        return self.__str__()
 
 
 class TickerEventTracker(EventTracker):
@@ -394,6 +393,12 @@ class TickerEventTracker(EventTracker):
             print("No event signaled for {}".format(self.current_ticker))
         return evts
 
+    def __str__(self):
+        p_s = f"{self.symbol}: "
+        r_s = f"ranges:{self.params.get('ranges')}"
+        m_s = f", max_day:{self.params.get('max_day')}"
+        l_s = f", max_lag:{self.params.get('max_lag')}"
+        return p_s + r_s + m_s + l_s
 
 
 def ticker_response_adapter(response, symbol, service_url):
@@ -584,6 +589,7 @@ if __name__ == '__main__':
     args = get_args()
     yaml_content = get_yaml_content(args)
     bot = setup_bot(yaml_content)
+    bot.check_active()
     last_yaml_update = get_yaml_modified_date(args)
     print("Running schedules, press Ctrl-C to stop!")
     try:
