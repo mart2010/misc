@@ -81,7 +81,7 @@ class Bot(object):
     def __str__(self):
         if hasattr(self, 'run_schedules') and len(self.run_schedules) > 0:
             prefix = "Bot schedules:\n\t\t-"
-            tab_l = [f"{r['tracker']}, refresh every {r['interval']}\n" for r in self.run_schedules]
+            tab_l = ["{}, refresh every {}\n".format(r['tracker'], r['interval']) for r in self.run_schedules]
             return prefix + "\t\t- ".join(tab_l)
         else:
             return "Bot has no run schedules"
@@ -394,10 +394,10 @@ class TickerEventTracker(EventTracker):
         return evts
 
     def __str__(self):
-        p_s = f"{self.symbol}: "
-        r_s = f"ranges:{self.params.get('ranges')}"
-        m_s = f", max_day:{self.params.get('max_day')}"
-        l_s = f", max_lag:{self.params.get('max_lag')}"
+        p_s = "{}: ".format(self.symbol)
+        r_s = "ranges:{}".format(self.params.get('ranges'))
+        m_s = ", max_day:{}".format(self.params.get('max_day'))
+        l_s = ", max_lag:{}".format(self.params.get('max_lag'))
         return p_s + r_s + m_s + l_s
 
 
