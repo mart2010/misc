@@ -212,13 +212,13 @@ class SimpleTickerDataFeed(DataFeedService):
     def request(self, request_params):
         complete_url = self.url.format(**request_params)
 
-        # r = requests.get(complete_url)
-        # if r.status_code != requests.codes.ok:
-        #     raise Exception("Request {} response not 200-OK: {}".format(complete_url, r))
-        # response = r.json()
+        r = requests.get(complete_url)
+        if r.status_code != requests.codes.ok:
+            raise Exception("Request {} response not 200-OK: {}".format(complete_url, r))
+        response = r.json()
 
         # or mock-up for test..
-        response = mockup_response(self.url)
+        # response = mockup_response(self.url)
         return response
 
 def mockup_response(url):
@@ -362,10 +362,17 @@ class TickerEventTracker(EventTracker):
                               lag_value=lag_value)
 
     def signal_events(self, response):
-        self.tickers.append(ticker_response_adapter(response, self.symbol, self.datafeed_service.url))
+        evts = list()
+        try:
+            ticker_ad = ticker_response_adapter(response, self.symbol, self.datafeed_service.url)
+        except Exception as e:
+            print("Cannot signal event due to error during response adapter: {}".format(e))
+            return evts
+
+        self.tickers.append(ticker_ad)
         self.current_ticker = self.tickers[-1]
         self.previous_ticker = self.tickers[-2] if len(self.tickers) > 1 else None
-        evts = list()
+
 
         for r in self.ranges:
             range_evt = self.range_event(lo=r['lo'], hi=r['hi'])
@@ -426,7 +433,7 @@ def ticker_response_adapter(response, symbol, service_url):
                       vwap=     response.get('vwap',-1))
     elif service_url.lower().find('kraken') > -1:
         if len(response['result'].keys()) != 1:
-            raise Exception("Adapter received Unexpected response '{}' from  {}".format(response['result'], service_url))
+            raise Exception("Adapter received Unexpected response '{}' from {}".format(response['result'], service_url))
         else:
             symbol_key = list(response['result'].keys())[0]
             values = dict(current=  response['result'][symbol_key]['c'][0],
@@ -438,7 +445,6 @@ def ticker_response_adapter(response, symbol, service_url):
                       ask=      response['result'][symbol_key]['a'][0],
                       vwap=     response['result'][symbol_key]['p'][1])
     elif service_url.lower().find('bitfinex') > -1:
-        print("response de...:{}".format(response))
         values = dict(current=  response['last_price'],
                       open=     response.get('open'),
                       timestamp=response['timestamp'],
