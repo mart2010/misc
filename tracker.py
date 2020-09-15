@@ -65,9 +65,9 @@ class Bot(object):
             service_response = tracker.datafeed_service.request(request_params=request_p)
         except Exception as e:
             events_msg = list()
-            events_msg.append(Event("Bot tracker error: {error}", error= str(e)))
-
-        events_msg = tracker.signal_events(service_response)
+            events_msg.append(Event("Bot datafeed service raised error: {error}", error= str(e)))
+        else:
+            events_msg = tracker.signal_events(service_response)
 
         for n in self.notification_services:
             n.notify(events_msg)
@@ -149,9 +149,9 @@ class PushBulletNotificationService(NotificationService):
 
     def _notify(self, events):
         push = self.pb.push_note(self.short_messages(events), self.long_messages(events))
-        print("le retour du push {}".format(push))
-        #if push.status_code != 200:
-        #    raise Exception('Error with PushBulletNotificationService', resp.status_code)
+        #print("le retour du push {}".format(push))
+        if not push:
+            raise Exception('Error with PushBulletNotificationService')
 
 
 pwd_saved = None
@@ -366,7 +366,9 @@ class TickerEventTracker(EventTracker):
         try:
             ticker_ad = ticker_response_adapter(response, self.symbol, self.datafeed_service.url)
         except Exception as e:
-            print("Cannot signal event due to error during response adapter: {}".format(e))
+            e_s = Event("Cannot signal event, error raised during response adapter: {}".format(e))
+            print(e_s.text)
+            evts.append(e_s)
             return evts
 
         self.tickers.append(ticker_ad)
