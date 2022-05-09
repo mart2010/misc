@@ -3,7 +3,12 @@ import os
 import pickle
 import argparse
 
-# pip install --upgrade google-api-python-client google-auth-httplib2 google-auth-oauthlib
+
+# for setting-up, see https://developers.google.com/gmail/api/quickstart/python
+# https://www.thepythoncode.com/article/use-gmail-api-in-python
+
+
+# pip3 install --upgrade google-api-python-client google-auth-httplib2 google-auth-oauthlib
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
@@ -23,8 +28,8 @@ from mimetypes import guess_type as guess_mime_type
 # Request all access (permission to read/send/receive emails, manage the inbox, and more)
 SCOPES = ['https://mail.google.com/']
 MY_GMAIL = 'martin.l.ouellet@gmail.com'
-MY_GMAIL_CREDENTIAL = 'mlo_gmail_credentials.json'
-MY_PICKLE_TOKEN = 'mlo_gmail_token.pickle'
+MY_CREDENTIAL = os.path.join(os.path.expanduser('~'), '.google', 'credentials.json')
+MY_PICKLE_TOKEN = os.path.join(os.path.expanduser('~'), '.google', 'credential_token.pickle')
 
 def format_size(b, suffix='b'):
     for unit in ('', 'K', 'M', 'G', 'T'):
@@ -44,24 +49,20 @@ def gmail_authenticate():
     """
     creds = None
 
-    my_gmail_credential = os.path.join(os.path.expanduser('~'), MY_GMAIL_CREDENTIAL)
-
     #  token file stores user's access and refresh tokens
     #  and is created automatically when authorization flow completes the first time
-    my_pickle_token = os.path.join(os.path.expanduser('~'), MY_PICKLE_TOKEN)
-
-    if os.path.exists(my_pickle_token):
-        with open(my_pickle_token, 'rb') as token:
-            creds = pickle.load(my_pickle_token)
+    if os.path.exists(MY_PICKLE_TOKEN):
+        with open(MY_PICKLE_TOKEN, 'rb') as token:
+            creds = pickle.load(token)
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            flow = InstalledAppFlow.from_client_secrets_file(my_gmail_credential, SCOPES)
+            flow = InstalledAppFlow.from_client_secrets_file(MY_CREDENTIAL, SCOPES)
             creds = flow.run_local_server(port=0)
         # save the credentials for the next run
-        with open(my_pickle_token,'wb') as token:
+        with open(MY_PICKLE_TOKEN,'wb') as token:
             pickle.dump(creds, token)
     
     return build('gmail', 'v1', credentials=creds)
@@ -71,9 +72,9 @@ def search_messages(service, query):
     """Search email and return all paginated messages. Each Message includes their IDs, 
     useful to later process them (delete, mark as read, mark as unread, and search features..)
     """
-
+    print(f"{query}")
     result = service.users().messages().list(userId='me',q=query).execute()
-    messages = [ ]
+    messages = []
     if 'messages' in result:
         messages.extend(result['messages'])
     while 'nextPageToken' in result:
@@ -84,14 +85,16 @@ def search_messages(service, query):
     return messages
 
 
-def search_with_attachment(service, file_types, after=None, before=None):
-    file_types = " OR ".join(file_types)
-    search_query = 'filename:{file_types}'
+def search_with_attachment(service, file_types, after=None, before=None, larger_than=None):
+    file_types_s = [f'filename:{f}' for f in file_types]
+    search_query = " OR ".join(file_types_s)
     # date format : 'yyyy/mm/dd'
     if after:
-        search_query =+ f" after:{after}"
+        search_query += f' after:{after}'
     if before:
-        search_query =+ f" before:{before}"
+        search_query += f' before:{before}'
+    if larger_than:
+        search_query += f' larger_than:{larger_than}'
 
     return search_messages(service, search_query)
 
@@ -218,7 +221,7 @@ def read_message(service, message):
 
 
 
-def download_attachments(service, user_id, msg_id, store_dir="."):
+def download_attachments(service, user_id, msg_id, store_dir):
     """Get and store attachment from Message with given id.
     service: Authorized Gmail API service instance.
     user_id: User's email address. Use value "me" to indicate authenticated user.
@@ -249,6 +252,7 @@ def download_attachments(service, user_id, msg_id, store_dir="."):
                 if file_data:
                     filename = f"EmailId-{msg_id}_{part['filename']}"
                     filepath = os.path.join(store_dir, filename)
+                    print(f'Saving file={filepath}')
                     with open(filepath, 'wb') as f:
                         f.write(file_data)
     except Exception as error:
@@ -261,11 +265,12 @@ def download_email_attachments():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('-o', 'out_dir', default="c:\\Temp\\mail_out")
-    parser.add_argument('-t','file_types', default="jpeg,jpg,bmp,gif,png")
-    parser.add_argument('-y','--years', help="Limit search to From-To year", default='all')
+    parser.add_argument('out_dir', help="Dir where to download files")
+    parser.add_argument('years', help="Limit search 'From-To' year")
+    parser.add_argument('-t','--file_types', default="jpeg,jpg,bmp,gif")
+    parser.add_argument('-lt','--larger_than', default="100k")
+
     args = parser.parse_args()
-    print(args)
 
     service = gmail_authenticate()
 
@@ -278,12 +283,12 @@ if __name__ == '__main__':
         msgs_found = search_with_attachment(service, 
                         file_types=args.file_types.split(','), 
                         after=f'{after_yr}/01/01', 
-                        before=f'{before_yr}/01/01')
+                        before=f'{before_yr}/01/01',
+                        larger_than=args.larger_than)
     else:
         msgs_found = search_with_attachment(service, 
-                        file_types=args.file_types.split(','))
-
-    print(len(msgs_found))
+                        file_types=args.file_types.split(','),
+                        larger_than=args.larger_than)
 
     for msg in msgs_found:
         download_attachments(service, user_id='me', msg_id=msg['id'], store_dir=out_dir)
