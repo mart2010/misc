@@ -57,10 +57,14 @@ def image_creation_date(img_filepath):
         if img_exif:
             all_tags = [f"{TAGS.get(k,'Unknonw tag')}({k}): {v}({v.__class__.__name__})" for k,v in img_exif.items()] 
             logger.debug(f"Exif metadata for {img_filepath!r}:\n{' | '.join(all_tags)}")
-            for k in EXIF_DATE_TAGS.values():
-                extracted_date = datetime.strptime(img_exif[k],date_pattern) if img_exif.get(k) else datetime.max
-                if extracted_date < found_date:
-                    found_date = extracted_date
+            for n,k in EXIF_DATE_TAGS.items():
+                try:
+                    extracted_date = datetime.strptime(img_exif[k],date_pattern) if img_exif.get(k) else datetime.max
+                except ValueError:
+                    logger.error(f"Unrecognized Date {img_exif[k]!r} extracted from ExifTAGS {n!r}")
+                else:
+                    if extracted_date < found_date:
+                        found_date = extracted_date
     if found_date == datetime.max:
         return None
     else:
@@ -156,7 +160,7 @@ if __name__ == '__main__':
     parser.add_argument('-d','--dir_pattern', default="%Y", choices=("%Y", "%Y-%m", "%Y-%m-%d"), help="Directory template date name")
     parser.add_argument('-k', '--keep_ori', action='store_true', help="Keep original media file")
     parser.add_argument('-o', '--overwrite', action='store_true', help="Overwrite when target file is present")
-    parser.add_argument('-log', '--loglevel', default='warning', choices=logging._nameToLevel.keys(), help="Provide loggin level")
+    parser.add_argument('-log', '--loglevel', default=logging._nameToLevel['WARNING'], choices=logging._nameToLevel.keys(), help="Provide loggin level")
     args = parser.parse_args()
     print(args)
 
